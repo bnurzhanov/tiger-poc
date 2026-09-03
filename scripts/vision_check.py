@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import io
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -47,6 +48,32 @@ DEFAULT_PROMPT = (
     "animals, people, or notable objects and roughly where they are in "
     "the frame."
 )
+
+
+def load_local_env() -> None:
+    """Load simple KEY=value entries from the repository's local .env file.
+
+    Existing shell variables take precedence, so explicit terminal exports
+    remain the source of truth.
+    """
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.is_file():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        name = name.strip()
+        value = value.strip()
+        if name.startswith("export "):
+            name = name[7:].strip()
+        if not name:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        os.environ.setdefault(name, value)
 
 
 def parse_args() -> argparse.Namespace:
@@ -84,6 +111,7 @@ def capture_frame(
     deglare: bool,
 ) -> bytes:
     """Grab a single frame from the RTSP camera and return it JPEG-encoded."""
+    load_local_env()
     try:
         config = CameraConfig.from_env(host=host, quality=quality)
     except ValueError as exc:
@@ -112,18 +140,38 @@ def capture_frame(
     return encoded.tobytes()
 
 
-def analyze_image_foundry(model_alias: str, prompt: str, image_bytes: bytes, image_format: str) -> str:
+def analyze_image_foundry(
+    model_alias: str,
+    prompt: str,
+    image_bytes: bytes,
+    image_format: str,
+    max_output_tokens: int = 700,
+    temperature: float = 0.0,
+    frequency_penalty: float = 0.6,
+    presence_penalty: float = 0.6,
+) -> str:
     """Run a single-turn vision inference request against a local Foundry Local model.
 
     Uses the native ChatSession API (foundry-local-sdk v2.0.1+), which differs
     from the OpenAI-wrapper pattern shown in Microsoft's public docs. The
     response comes back as a MessageItem whose text lives in a nested TextItem
     part, not on the MessageItem itself.
+
+    Generation is capped and made deterministic (low ``temperature``, bounded
+    ``max_output_tokens``) because the small quantized instruct models used
+    here occasionally fall into repetitive loops that produce very long,
+    malformed output when left unconstrained. ``temperature=0`` uses greedy
+    decoding, which is especially prone to getting stuck repeating the same
+    token (observed here as a single label repeated hundreds of times until
+    the token limit cut the JSON off mid-array). ``frequency_penalty`` and
+    ``presence_penalty`` (OpenAI-style scale, -2.0 to 2.0) counteract that by
+    penalizing tokens the model has already used.
     """
     from foundry_local_sdk import Configuration, FoundryLocalManager
     from foundry_local_sdk.items import ImageItem, MessageItem, MessageRole, TextItem
     from foundry_local_sdk.request import Request
     from foundry_local_sdk.session import ChatSession
+    from foundry_local_sdk.session_types import RequestOptions, SearchOptions
 
     manager = FoundryLocalManager.instance
     if manager is None:
@@ -151,6 +199,17 @@ def analyze_image_foundry(model_alias: str, prompt: str, image_bytes: bytes, ima
             )
             with Request() as request:
                 request.add_item(message)
+                request.set_options(
+                    RequestOptions(
+                        search=SearchOptions(
+                            temperature=temperature,
+                            max_output_tokens=max_output_tokens,
+                            do_sample=temperature > 0,
+                            frequency_penalty=frequency_penalty,
+                            presence_penalty=presence_penalty,
+                        )
+                    )
+                )
                 with session.process_request(request) as response:
                     texts = [
                         part.text

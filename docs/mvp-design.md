@@ -37,6 +37,22 @@ The hypothesis is supported when the team can create a second variation of the i
 * A simple configuration file for selecting the source, inference mode, ontology mappings, and destination
 * Basic logs and a repeatable demo path
 
+### macOS MLX camera inference
+
+On Apple Silicon macOS, run object recognition with the native MLX backend:
+
+```bash
+python scripts/object_label.py \
+  --backend mlx \
+  --host "${TAPO_HOST}" \
+  --output camera-labeled.jpg \
+  --edges-output camera-edges.jpg
+```
+
+The command captures one frame from the camera, runs the default MLX-VLM
+model on the Mac GPU, writes the object-labeled image, and writes a separate
+edge visualization. Use `--model` to select a different MLX-compatible model.
+
 ### Out of scope
 
 * Production-grade fleet management
