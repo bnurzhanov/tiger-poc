@@ -14,6 +14,7 @@ import sys
 import cv2
 
 from tiger_poc.capture import CameraConfig, CameraConnectionError, RtspCamera
+from tiger_poc.capture.image_correction import reduce_window_glare
 
 logger = logging.getLogger("camera_check")
 
@@ -25,6 +26,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--frames", type=int, default=30, help="Frames to read")
     parser.add_argument("--target-fps", type=float, default=None)
     parser.add_argument("--save-frame", help="Write the last frame to this path")
+    parser.add_argument(
+        "--deglare",
+        action="store_true",
+        help="Reduce broad window glare in the saved frame",
+    )
     parser.add_argument("--onvif", action="store_true", help="Also query ONVIF info")
     return parser.parse_args()
 
@@ -81,7 +87,8 @@ def main() -> int:
         return 1
 
     if args.save_frame:
-        cv2.imwrite(args.save_frame, last_frame.image)
+        image = reduce_window_glare(last_frame.image) if args.deglare else last_frame.image
+        cv2.imwrite(args.save_frame, image)
         logger.info("Wrote %s", args.save_frame)
 
     logger.info("OK: read %d frames from %s", last_frame.sequence, config.safe_url)

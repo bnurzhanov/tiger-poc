@@ -33,6 +33,7 @@ from pathlib import Path
 import cv2
 
 from tiger_poc.capture import CameraConfig, CameraConnectionError, RtspCamera
+from tiger_poc.capture.image_correction import reduce_window_glare
 
 logger = logging.getLogger("vision_check")
 
@@ -57,6 +58,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--quality", choices=("hd", "sd"), default="hd")
     parser.add_argument("--save-frame", help="Write the captured frame to this path")
     parser.add_argument(
+        "--deglare",
+        action="store_true",
+        help="Reduce broad window glare before saving or analyzing the frame",
+    )
+    parser.add_argument(
         "--backend",
         choices=("foundry", "mlx"),
         default="foundry",
@@ -71,7 +77,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def capture_frame(host: str | None, quality: str, save_frame: str | None) -> bytes:
+def capture_frame(
+    host: str | None,
+    quality: str,
+    save_frame: str | None,
+    deglare: bool,
+) -> bytes:
     """Grab a single frame from the RTSP camera and return it JPEG-encoded."""
     try:
         config = CameraConfig.from_env(host=host, quality=quality)
@@ -89,11 +100,12 @@ def capture_frame(host: str | None, quality: str, save_frame: str | None) -> byt
     height, width = frame.image.shape[:2]
     logger.info("frame %d %dx%d at %s", frame.sequence, width, height, frame.timestamp.isoformat())
 
+    image = reduce_window_glare(frame.image) if deglare else frame.image
     if save_frame:
-        cv2.imwrite(save_frame, frame.image)
+        cv2.imwrite(save_frame, image)
         logger.info("Wrote %s", save_frame)
 
-    ok, encoded = cv2.imencode(".jpg", frame.image)
+    ok, encoded = cv2.imencode(".jpg", image)
     if not ok:
         logger.error("Failed to JPEG-encode captured frame")
         raise SystemExit(1)
@@ -189,7 +201,9 @@ def main() -> int:
         if image_format == "jpg":
             image_format = "jpeg"
     else:
-        image_bytes = capture_frame(args.host, args.quality, args.save_frame)
+        image_bytes = capture_frame(
+            args.host, args.quality, args.save_frame, args.deglare
+        )
         image_format = "jpeg"
 
     if args.backend == "mlx":

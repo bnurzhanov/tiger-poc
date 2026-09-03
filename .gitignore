@@ -5,3 +5,5 @@ data/
 models/
 .env
 .vscode/
+*.jpg
+*.jpeg
