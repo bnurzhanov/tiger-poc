@@ -34,9 +34,9 @@ spec:
         state: fluid-present
 
   destination:
-    connector: existing-twin
-    endpointFrom: TWIN_ENDPOINT
-    credentialFrom: TWIN_CREDENTIAL
+    connector: fabric-digital-twin-builder
+    eventstreamFrom: FABRIC_EVENTSTREAM_ENDPOINT
+    credentialFrom: FABRIC_CREDENTIAL
 
   observability:
     logObservations: true

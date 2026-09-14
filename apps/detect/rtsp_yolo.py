@@ -27,7 +27,7 @@ APP_DIR = Path(__file__).resolve().parent
 DEFAULT_MODEL = APP_DIR / "yolo26n.pt"
 DEFAULT_OUTPUT = APP_DIR / "detections.jsonl"
 DEFAULT_RTSP_URL = (
-    "rtsp://192.168.2.102:554/cam/realmonitor?channel=1&subtype=0"
+    "rtsp://localhost:554/cam/realmonitor?channel=1&subtype=0"
 )
 
 logger = logging.getLogger(__name__)
