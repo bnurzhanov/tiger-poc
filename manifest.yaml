@@ -1,0 +1,43 @@
+apiVersion: tiger.microsoft.com/v1alpha1
+kind: PerceptionWorkload
+
+metadata:
+  name: line-fluid-presence
+
+spec:
+  deployment:
+    target: azure-local
+    replicas: 1
+
+  sources:
+    - id: fill-station-camera
+      type: rtsp
+      uriFrom: CAMERA_1_RTSP_URI
+      subjectId: fill-station-01
+    - id: inspection-camera
+      type: rtsp
+      uriFrom: CAMERA_2_RTSP_URI
+      subjectId: inspection-station-01
+
+  perception:
+    provider: foundry-local
+    model: fluid-presence-detector
+    observationType: FluidPresence
+    sampleEveryFrames: 5
+
+  eventMapping:
+    ontology: line-monitoring-v1
+    rule:
+      when: "observation.value == true"
+      emit:
+        eventType: FluidPresenceConfirmed
+        state: fluid-present
+
+  destination:
+    connector: existing-twin
+    endpointFrom: TWIN_ENDPOINT
+    credentialFrom: TWIN_CREDENTIAL
+
+  observability:
+    logObservations: true
+    logEvents: true
