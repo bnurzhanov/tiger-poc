@@ -1,43 +1,33 @@
 apiVersion: tiger.microsoft.com/v1alpha1
 kind: PerceptionWorkload
-
 metadata:
-  name: line-fluid-presence
-
+  name: aisle-cycle-count
 spec:
   deployment:
     target: azure-local
     replicas: 1
 
   sources:
-    - id: fill-station-camera
+    - id: aisle-12-camera
       type: rtsp
-      uriFrom: CAMERA_1_RTSP_URI
-      subjectId: fill-station-01
-    - id: inspection-camera
-      type: rtsp
-      uriFrom: CAMERA_2_RTSP_URI
-      subjectId: inspection-station-01
+      uriFrom: CAMERA_AISLE12_RTSP_URI
+      subjectId: aisle-12
 
   perception:
     provider: foundry-local
-    model: fluid-presence-detector
-    observationType: FluidPresence
-    sampleEveryFrames: 5
+    model: pallet-counter
+    observationType: PalletCount
+    sampleEveryFrames: 30    # cycle counts don't need every-frame sampling
 
   eventMapping:
-    ontology: line-monitoring-v1
+    ontology: inventory-v1
     rule:
-      when: "observation.value == true"
+      when: "abs(observation.value - system.expectedCount) > 0"
       emit:
-        eventType: FluidPresenceConfirmed
-        state: fluid-present
+        eventType: InventoryDiscrepancy
+        delta: "observation.value - system.expectedCount"
 
   destination:
-    connector: fabric-digital-twin-builder
-    eventstreamFrom: FABRIC_EVENTSTREAM_ENDPOINT
-    credentialFrom: FABRIC_CREDENTIAL
-
-  observability:
-    logObservations: true
-    logEvents: true
+    connector: inventory-system   # different connector than existing-twin
+    endpointFrom: WMS_ENDPOINT
+    credentialFrom: WMS_CREDENTIAL
