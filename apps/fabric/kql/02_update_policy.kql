@@ -1,0 +1,58 @@
+// ==============================================================================
+// Microsoft Fabric Eventhouse / KQL Database - Materialized Views / Update Policy
+// Continuous Aggregation for Pallet Positions Current State
+// ==============================================================================
+
+// Table storing the latest confirmed occupancy state per pallet position
+.create table PalletPositionsLatestState (
+    subjectId: string,
+    plantId: string,
+    plantName: string,
+    sourceId: string,
+    isOccupied: bool,
+    confidence: real,
+    lastCapturedAt: datetime,
+    lastProducedAt: datetime,
+    lastPublishedAt: datetime,
+    lastUpdated: datetime,
+    model: string,
+    provider: string
+)
+
+// Ingestion transformation function
+.create-or-alter function ExtractLatestPalletState() {
+    ProcessEventsRaw
+    | where observationType == "PalletPresent"
+    | project
+        subjectId = tostring(subjectId),
+        plantId = tostring(plantId),
+        plantName = tostring(plantName),
+        sourceId = tostring(sourceId),
+        isOccupied = tobool(value),
+        confidence = toreal(confidence),
+        lastCapturedAt = todatetime(capturedAt),
+        lastProducedAt = todatetime(producedAt),
+        lastPublishedAt = todatetime(publishedAt),
+        lastUpdated = now(),
+        model = tostring(model),
+        provider = tostring(provider)
+}
+
+// Materialized view to guarantee instant sub-second lookup of the current state of every position
+.create materialized-view with (backfill=true) CurrentPalletOccupancy on table ProcessEventsRaw
+{
+    ProcessEventsRaw
+    | where observationType == "PalletPresent"
+    | summarize arg_max(capturedAt, *) by subjectId
+    | project
+        subjectId,
+        plantId,
+        plantName,
+        sourceId,
+        isOccupied = tobool(value),
+        confidence = toreal(confidence),
+        capturedAt,
+        publishedAt,
+        model,
+        provider
+}

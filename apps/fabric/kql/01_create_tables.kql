@@ -1,0 +1,83 @@
+// ==============================================================================
+// Microsoft Fabric Eventhouse / KQL Database - Schema Definitions
+// Workload: Factory Edge Perception to Digital Twin POC
+// ==============================================================================
+
+// 1. Raw ProcessEvents streaming table (Ingested directly from Fabric Eventstream)
+.create table ProcessEventsRaw (
+    schemaVersion: string,
+    eventId: string,
+    eventType: string,
+    sourceId: string,
+    subjectId: string,
+    observationType: string,
+    value: dynamic,
+    unit: string,
+    confidence: real,
+    capturedAt: datetime,
+    producedAt: datetime,
+    publishedAt: datetime,
+    provider: string,
+    model: string,
+    source: string,
+    plantName: string,
+    plantId: string,
+    ingestionTime: datetime
+)
+
+// Ingestion mapping for JSON payloads arriving from Eventstream
+.create table ProcessEventsRaw ingestion json mapping "ProcessEventsRaw_JSON_Mapping"
+'['
+'    {"column": "schemaVersion", "path": "$.schemaVersion"},'
+'    {"column": "eventId", "path": "$.eventId"},'
+'    {"column": "eventType", "path": "$.eventType"},'
+'    {"column": "sourceId", "path": "$.sourceId"},'
+'    {"column": "subjectId", "path": "$.subjectId"},'
+'    {"column": "observationType", "path": "$.observationType"},'
+'    {"column": "value", "path": "$.value"},'
+'    {"column": "unit", "path": "$.unit"},'
+'    {"column": "confidence", "path": "$.confidence"},'
+'    {"column": "capturedAt", "path": "$.capturedAt"},'
+'    {"column": "producedAt", "path": "$.producedAt"},'
+'    {"column": "publishedAt", "path": "$.publishedAt"},'
+'    {"column": "provider", "path": "$.provider"},'
+'    {"column": "model", "path": "$.model"},'
+'    {"column": "source", "path": "$.source"},'
+'    {"column": "plantName", "path": "$.plantName"},'
+'    {"column": "plantId", "path": "$.plantId"},'
+'    {"column": "ingestionTime", "path": "$[\'ingestion_time\']"}'
+']'
+
+// 2. Reference Tables for Twin Hierarchy (Plant -> Cell -> PalletPosition)
+.create table Plants (
+    plantId: string,
+    plantName: string,
+    location: string,
+    createdTimestamp: datetime
+)
+
+.create table Cells (
+    cellId: string,
+    plantId: string,
+    cellName: string,
+    lineType: string
+)
+
+.create table PalletPositions (
+    palletPositionId: string,
+    cellId: string,
+    positionName: string,
+    monitoredSourceId: string
+)
+
+// Seed Reference Data
+.ingest inline into table Plants <|
+demo-plant-01,Demo Plant 01,Seattle WA,2026-09-15T00:00:00Z
+
+.ingest inline into table Cells <|
+cell-a,demo-plant-01,Assembly Cell Alpha,Robotic Assembly
+cell-b,demo-plant-01,Packaging Cell Beta,Automated Packaging
+
+.ingest inline into table PalletPositions <|
+cell-a-pallet-position-01,cell-a,Inbound Pallet Station A1,cell-a-camera-01
+cell-b-pallet-position-01,cell-b,Outbound Pallet Station B1,cell-b-camera-01

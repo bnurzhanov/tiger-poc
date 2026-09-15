@@ -1,0 +1,56 @@
+{
+  "plants": [
+    {
+      "plantId": "demo-plant-01",
+      "plantName": "Demo Plant 01",
+      "location": "Seattle, WA",
+      "relationships": {
+        "containsCell": ["cell-a", "cell-b"]
+      }
+    }
+  ],
+  "cells": [
+    {
+      "cellId": "cell-a",
+      "plantId": "demo-plant-01",
+      "cellName": "Assembly Cell Alpha",
+      "lineType": "Robotic Assembly",
+      "relationships": {
+        "monitorsPosition": ["cell-a-pallet-position-01"]
+      }
+    },
+    {
+      "cellId": "cell-b",
+      "plantId": "demo-plant-01",
+      "cellName": "Packaging Cell Beta",
+      "lineType": "Automated Packaging",
+      "relationships": {
+        "monitorsPosition": ["cell-b-pallet-position-01"]
+      }
+    }
+  ],
+  "palletPositions": [
+    {
+      "palletPositionId": "cell-a-pallet-position-01",
+      "cellId": "cell-a",
+      "positionName": "Inbound Pallet Station A1",
+      "monitoredSourceId": "cell-a-camera-01",
+      "initialState": {
+        "isOccupied": false,
+        "confidence": 1.0,
+        "lastObservedTimestamp": "2026-09-15T00:00:00Z"
+      }
+    },
+    {
+      "palletPositionId": "cell-b-pallet-position-01",
+      "cellId": "cell-b",
+      "positionName": "Outbound Pallet Station B1",
+      "monitoredSourceId": "cell-b-camera-01",
+      "initialState": {
+        "isOccupied": false,
+        "confidence": 1.0,
+        "lastObservedTimestamp": "2026-09-15T00:00:00Z"
+      }
+    }
+  ]
+}

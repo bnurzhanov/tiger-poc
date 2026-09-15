@@ -1,0 +1,19 @@
+[project]
+name = "tiger-edge-perception"
+version = "0.1.0"
+description = "Edge perception pipeline and Microsoft Fabric connector"
+requires-python = ">=3.11"
+dependencies = [
+    "azure-eventhub>=5.11.5",
+    "opencv-python-headless>=4.10.0.84",
+    "pytest>=8.3.0",
+    "pytest-mock>=3.14.0",
+    "pyyaml>=6.0.2",
+    "requests>=2.32.3",
+    "ruff>=0.9.0",
+    "ultralytics>=8.3.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

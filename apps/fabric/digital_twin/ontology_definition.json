@@ -1,0 +1,70 @@
+{
+  "$schema": "https://fabric.microsoft.com/schemas/digitaltwin/ontology-definition-v1.json",
+  "name": "ManufacturingPlantTwin",
+  "version": "1.0.0",
+  "description": "Digital Twin ontology modeling Plants, Cells, and Pallet Positions with streaming edge perception telemetry",
+  "entityTypes": [
+    {
+      "id": "Plant",
+      "displayName": "Manufacturing Plant",
+      "description": "Physical factory facility",
+      "properties": [
+        { "name": "plantId", "type": "string", "isPrimaryKey": true },
+        { "name": "plantName", "type": "string" },
+        { "name": "location", "type": "string" }
+      ]
+    },
+    {
+      "id": "Cell",
+      "displayName": "Manufacturing Cell",
+      "description": "Work cell or robotic station inside a plant",
+      "properties": [
+        { "name": "cellId", "type": "string", "isPrimaryKey": true },
+        { "name": "cellName", "type": "string" },
+        { "name": "lineType", "type": "string" }
+      ]
+    },
+    {
+      "id": "PalletPosition",
+      "displayName": "Pallet Position",
+      "description": "Monitored staging or storage location for pallets",
+      "properties": [
+        { "name": "palletPositionId", "type": "string", "isPrimaryKey": true },
+        { "name": "positionName", "type": "string" },
+        { "name": "isOccupied", "type": "boolean" },
+        { "name": "confidence", "type": "double" },
+        { "name": "lastObservedTimestamp", "type": "datetime" },
+        { "name": "monitoredSourceId", "type": "string" }
+      ]
+    }
+  ],
+  "relationshipTypes": [
+    {
+      "id": "containsCell",
+      "displayName": "Contains Cell",
+      "sourceEntityType": "Plant",
+      "targetEntityType": "Cell"
+    },
+    {
+      "id": "monitorsPosition",
+      "displayName": "Monitors Pallet Position",
+      "sourceEntityType": "Cell",
+      "targetEntityType": "PalletPosition"
+    }
+  ],
+  "telemetryBindings": [
+    {
+      "targetEntityType": "PalletPosition",
+      "sourceStream": "ProcessEventsRaw",
+      "mappingRule": {
+        "matchProperty": "subjectId",
+        "entityPrimaryKey": "palletPositionId",
+        "propertyUpdates": {
+          "isOccupied": "tobool(value)",
+          "confidence": "toreal(confidence)",
+          "lastObservedTimestamp": "todatetime(capturedAt)"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "1.0",
+  "eventId": "evt-valid-001",
+  "eventType": "ProcessEvent",
+  "sourceId": "cell-a-camera-01",
+  "subjectId": "cell-a-pallet-position-01",
+  "observationType": "PalletPresent",
+  "value": true,
+  "unit": "boolean",
+  "confidence": 0.95,
+  "capturedAt": "2026-09-15T12:00:00Z",
+  "producedAt": "2026-09-15T12:00:02Z",
+  "publishedAt": "2026-09-15T12:00:02Z",
+  "provider": "local-yolo",
+  "model": "yolo26n-pallet",
+  "source": "rtsp",
+  "plantName": "Demo Plant 01",
+  "plantId": "demo-plant-01"
+}
