@@ -4,3 +4,7 @@
 data/
 models/
 .env
+.vscode/
+*.jpg
+*.jpeg
+settings.json

@@ -1,0 +1,373 @@
+<commit_history>
+  <current_branch>
+copilot/microsoft-foundry-model-comparison
+  </current_branch>
+
+  <base_branch>
+    origin/main
+  </base_branch>
+
+  <commits>
+<commit hash="86f6941" date="2026-09-03"><message><subject><\![CDATA[Add Bicep IaC for Microsoft Foundry model deployment]]></subject><body><\![CDATA[Co-authored-by: bnurzhanov <1046182+bnurzhanov@users.noreply.github.com>
+]]></body></message></commit>  </commits>
+
+  <full_diff>
+diff --git a/infra/README.md b/infra/README.md
+new file mode 100644
+index 0000000..5b04843
+--- /dev/null
++++ b/infra/README.md
+@@ -0,0 +1,93 @@
++# Microsoft Foundry model deployment (IaC)
++
++Bicep templates that provision a [Microsoft Foundry](https://ai.azure.com) account
++(`Microsoft.CognitiveServices/accounts`, kind `AIServices`) and deploy one or more
++models from the Foundry model catalog into it. This gives the "Foundry in the
++cloud" runtime described in [`../docs/mvp-design.md`](../docs/mvp-design.md) a
++repeatable, code-reviewed provisioning path that can be compared against a
++Foundry Local deployment of a small on-device model.
++
++## Layout
++
++```text
++infra/
++├── main.bicep                        # entry point: account + N model deployments
++├── models.json                       # default list of models to deploy
++├── main.parameters.json              # example parameter file
++└── modules/
++    ├── ai-foundry-account.bicep      # the Foundry (AIServices) account
++    └── model-deployment.bicep        # a single model deployment on that account
++```
++
++## Prerequisites
++
++* [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) with the Bicep tooling (`az bicep install`)
++* An Azure subscription and a resource group to deploy into
++* Quota for the chosen models/SKUs in the target region
++
++## Deploy
++
++```bash
++az login
++az account set --subscription "<subscription-id>"
++
++az group create --name rg-tiger-poc-foundry --location eastus2
++
++az deployment group create \
++  --resource-group rg-tiger-poc-foundry \
++  --template-file infra/main.bicep \
++  --parameters infra/main.parameters.json
++```
++
++Edit `infra/models.json` to change which models get deployed, or override
++`accountName`/`location` in `main.parameters.json` (or on the command line)
++before deploying.
++
++Each entry in `models.json` maps to one
++`Microsoft.CognitiveServices/accounts/deployments` resource:
++
++```json
++{
++  "provider": "Microsoft",
++  "name": "Phi-3.5-vision-instruct",
++  "version": "2",
++  "sku": "GlobalStandard",
++  "capacity": 1
++}
++```
++
++Model deployments on the same account are created serially
++(`@batchSize(1)`), which is required by the Foundry control plane.
++
++## Outputs
++
++* `endpoint` — base inference endpoint, `https://<accountName>.services.ai.azure.com/models`
++* `deployedModels` — the deployment names to use as the `model` value when
++  calling the OpenAI-compatible chat-completions API
++* `accountId` — resource ID of the Foundry account
++
++## Recommended vision-capable models
++
++For comparing a cloud-hosted Foundry model against a small model running
++locally (e.g. via Foundry Local), the following catalog models support image
++input and are configured by default in `models.json`:
++
++| Model | Provider | Size class | Notes |
++|---|---|---|---|
++| `Phi-3.5-vision-instruct` | Microsoft | Small (~4B) | Closest size/family match to models typically run locally via Foundry Local; good default baseline for a local-vs-cloud comparison. |
++| `Phi-4-multimodal-instruct` | Microsoft | Small (~5.6B) | Newer Microsoft small multimodal model (vision + audio + text); also available in Foundry Local's catalog, so the same model family can be run both locally and in the cloud. |
++| `gpt-4o-mini` | OpenAI | Small/low-cost | Vision-capable, cheap, low-latency cloud baseline when a Phi-family model isn't available locally. |
++| `gpt-4o` | OpenAI | Large | Highest-quality cloud vision baseline, useful as an upper bound when judging accuracy trade-offs. |
++| `Llama-3.2-11B-Vision-Instruct` | Meta | Medium (~11B) | Open-weight vision model; a useful mid-size point between the small Phi models and GPT-4o. |
++
++Guidance:
++
++* For a fair "small local model vs. small cloud model" comparison, prefer
++  `Phi-3.5-vision-instruct` or `Phi-4-multimodal-instruct` — both have
++  same-family counterparts in the Foundry Local catalog, so the local and
++  cloud adapters can run comparable model sizes and architectures.
++* Keep `gpt-4o` / `gpt-4o-mini` in the list only as a quality/cost reference
++  point; they have no equivalent-size local counterpart.
++* Not every model/SKU combination is available in every region or
++  subscription; check quota before deploying, and remove entries from
++  `models.json` that aren't available to you.
+diff --git a/infra/main.bicep b/infra/main.bicep
+new file mode 100644
+index 0000000..a56da20
+--- /dev/null
++++ b/infra/main.bicep
+@@ -0,0 +1,60 @@
++@description('Location to create the Microsoft Foundry account in.')
++param location string = resourceGroup().location
++
++@description('Name of the Microsoft Foundry account to create. Must be globally unique.')
++param accountName string
++
++@description('Pricing tier for the account.')
++param accountSku string = 'S0'
++
++@allowed([
++  'Enabled'
++  'Disabled'
++])
++@description('Whether public network access is allowed for this account.')
++param publicNetworkAccess string = 'Enabled'
++
++@description('Whether API-key authentication is allowed in addition to Microsoft Entra ID.')
++param allowApiKeyAuth bool = true
++
++@description('List of models to deploy, each with provider, name, version, sku and capacity. Defaults to models.json.')
++param models array = loadJsonContent('models.json')
++
++module foundryAccount 'modules/ai-foundry-account.bicep' = {
++  name: 'foundry-account'
++  params: {
++    accountName: accountName
++    location: location
++    sku: accountSku
++    publicNetworkAccess: publicNetworkAccess
++    allowApiKeyAuth: allowApiKeyAuth
++  }
++}
++
++// Foundry model deployments on the same account must be created one at a time.
++@batchSize(1)
++module modelDeployments 'modules/model-deployment.bicep' = [
++  for item in models: {
++    name: 'deployment-${item.name}'
++    params: {
++      accountName: accountName
++      modelName: item.name
++      modelVersion: item.version
++      modelPublisher: item.provider
++      skuName: item.sku
++      capacity: item.capacity
++    }
++    dependsOn: [
++      foundryAccount
++    ]
++  }
++]
++
++@description('Resource ID of the Foundry account.')
++output accountId string = foundryAccount.outputs.id
++
++@description('Base inference endpoint for models deployed under this account.')
++output endpoint string = foundryAccount.outputs.endpoint
++
++@description('Names of the model deployments created under the account, usable as the "model" value in inference requests.')
++output deployedModels array = [for i in range(0, length(models)): modelDeployments[i].outputs.deploymentName]
+diff --git a/infra/main.parameters.json b/infra/main.parameters.json
+new file mode 100644
+index 0000000..758b194
+--- /dev/null
++++ b/infra/main.parameters.json
+@@ -0,0 +1,18 @@
++{
++  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
++  "contentVersion": "1.0.0.0",
++  "parameters": {
++    "accountName": {
++      "value": "tiger-poc-foundry"
++    },
++    "location": {
++      "value": "eastus2"
++    },
++    "publicNetworkAccess": {
++      "value": "Enabled"
++    },
++    "allowApiKeyAuth": {
++      "value": true
++    }
++  }
++}
+diff --git a/infra/models.json b/infra/models.json
+new file mode 100644
+index 0000000..2ce43f5
+--- /dev/null
++++ b/infra/models.json
+@@ -0,0 +1,37 @@
++[
++  {
++    "provider": "Microsoft",
++    "name": "Phi-3.5-vision-instruct",
++    "version": "2",
++    "sku": "GlobalStandard",
++    "capacity": 1
++  },
++  {
++    "provider": "Microsoft",
++    "name": "Phi-4-multimodal-instruct",
++    "version": "1",
++    "sku": "GlobalStandard",
++    "capacity": 1
++  },
++  {
++    "provider": "OpenAI",
++    "name": "gpt-4o-mini",
++    "version": "2024-07-18",
++    "sku": "GlobalStandard",
++    "capacity": 1
++  },
++  {
++    "provider": "OpenAI",
++    "name": "gpt-4o",
++    "version": "2024-11-20",
++    "sku": "GlobalStandard",
++    "capacity": 1
++  },
++  {
++    "provider": "Meta",
++    "name": "Llama-3.2-11B-Vision-Instruct",
++    "version": "1",
++    "sku": "GlobalStandard",
++    "capacity": 1
++  }
++]
+diff --git a/infra/modules/ai-foundry-account.bicep b/infra/modules/ai-foundry-account.bicep
+new file mode 100644
+index 0000000..9626b2d
+--- /dev/null
++++ b/infra/modules/ai-foundry-account.bicep
+@@ -0,0 +1,46 @@
++@description('Location of the Microsoft Foundry (Azure AI Services) account.')
++param location string = resourceGroup().location
++
++@description('Name of the Microsoft Foundry account. Must be globally unique; also used as the custom subdomain.')
++param accountName string
++
++@description('Pricing tier for the account.')
++param sku string = 'S0'
++
++@allowed([
++  'Enabled'
++  'Disabled'
++])
++@description('Whether public network access is allowed for this account.')
++param publicNetworkAccess string = 'Enabled'
++
++@description('Whether API-key authentication is allowed in addition to Microsoft Entra ID.')
++param allowApiKeyAuth bool = true
++
++resource account 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
++  name: accountName
++  location: location
++  identity: {
++    type: 'SystemAssigned'
++  }
++  sku: {
++    name: sku
++  }
++  kind: 'AIServices'
++  properties: {
++    customSubDomainName: accountName
++    publicNetworkAccess: publicNetworkAccess
++    disableLocalAuth: !allowApiKeyAuth
++    // Required so the account can host Foundry projects and model deployments.
++    allowProjectManagement: true
++  }
++}
++
++@description('Resource ID of the Foundry account.')
++output id string = account.id
++
++@description('Name of the Foundry account.')
++output name string = account.name
++
++@description('Base inference endpoint for models deployed under this account.')
++output endpoint string = 'https://${account.name}.services.ai.azure.com/models'
+diff --git a/infra/modules/model-deployment.bicep b/infra/modules/model-deployment.bicep
+new file mode 100644
+index 0000000..a8997f9
+--- /dev/null
++++ b/infra/modules/model-deployment.bicep
+@@ -0,0 +1,67 @@
++@description('Name of the Microsoft Foundry account to deploy the model into. The account must already exist.')
++param accountName string
++
++@description('Catalog name of the model to deploy, e.g. "Phi-3.5-vision-instruct".')
++param modelName string
++
++@description('Catalog version of the model to deploy.')
++param modelVersion string
++
++@allowed([
++  'AI21 Labs'
++  'Cohere'
++  'Core42'
++  'DeepSeek'
++  'xAI'
++  'Meta'
++  'Microsoft'
++  'Mistral AI'
++  'OpenAI'
++  'NTT DATA'
++]
++)
++@description('Publisher of the model in the Foundry model catalog.')
++param modelPublisher string
++
++@allowed([
++  'GlobalStandard'
++  'DataZoneStandard'
++  'Standard'
++  'GlobalProvisioned'
++  'Provisioned'
++])
++@description('Deployment SKU (throughput/availability tier) for the model.')
++param skuName string = 'GlobalStandard'
++
++@description('Deployment capacity, in the units defined by the chosen SKU (e.g. thousands of tokens per minute).')
++param capacity int = 1
++
++@description('Name of the content-filter (RAI) policy to apply. Use "Microsoft.DefaultV2" for the built-in default.')
++param contentFilterPolicyName string = 'Microsoft.DefaultV2'
++
++resource account 'Microsoft.CognitiveServices/accounts@2024-10-01' existing = {
++  name: accountName
++}
++
++resource deployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
++  parent: account
++  name: modelName
++  sku: {
++    name: skuName
++    capacity: capacity
++  }
++  properties: {
++    model: {
++      format: modelPublisher
++      name: modelName
++      version: modelVersion
++    }
++    raiPolicyName: contentFilterPolicyName
++  }
++}
++
++@description('Resource ID of the model deployment.')
++output id string = deployment.id
++
++@description('Deployment name, used as the model name in inference requests.')
++output deploymentName string = deployment.name
+  </full_diff>
+</commit_history>
