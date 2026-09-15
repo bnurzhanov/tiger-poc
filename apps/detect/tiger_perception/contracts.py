@@ -43,6 +43,7 @@ class RawInference:
     model: str
     detections: list[RawDetection] = field(default_factory=list)
     metadata: dict[str, JsonValue] = field(default_factory=dict)
+    succeeded: bool = True
 
 
 @dataclass(frozen=True)

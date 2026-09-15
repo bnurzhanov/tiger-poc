@@ -122,3 +122,47 @@ def test_detector_builds_valid_process_event() -> None:
     assert event["value"] == 2
     assert 0.0 <= float(event["confidence"]) <= 1.0
     assert "token" not in json.dumps(event)
+
+
+def test_given_transient_write_failure_when_publishing_then_retry_same_event(sink_path, monkeypatch):
+    sink = LocalJsonlSink(path=sink_path, max_retries=2)
+    original = sink._write_line
+    writes = []
+
+    def write(line):
+        writes.append(line)
+        if len(writes) == 1:
+            raise OSError("private endpoint must not be logged")
+        original(line)
+
+    monkeypatch.setattr(sink, "_write_line", write)
+
+    assert sink.publish(valid_event())
+    assert writes[0] == writes[1]
+    assert sink.failed_count == 1
+    assert sink.published_count == 1
+
+
+def test_given_permanent_failure_when_publishing_then_bounded_redacted_error(sink_path, monkeypatch):
+    sink = LocalJsonlSink(path=sink_path, max_retries=2)
+
+    def fail(line):
+        raise OSError("rtsp://private-secret@camera")
+
+    monkeypatch.setattr(sink, "_write_line", fail)
+
+    with pytest.raises(SinkUnavailableError, match="retry budget") as error:
+        sink.publish(valid_event())
+    assert "private-secret" not in str(error.value)
+    assert sink.failed_count == 2
+
+
+def test_given_nested_secrets_when_publishing_then_redact_recursively(sink_path):
+    sink = LocalJsonlSink(path=sink_path)
+    event = valid_event()
+    event["observation"] = {"details": [{"password": "nested-secret", "camera": "rtsp://private"}]}
+
+    sink.publish(event)
+
+    assert "nested-secret" not in sink_path.read_text()
+    assert "rtsp://" not in sink_path.read_text()
