@@ -222,8 +222,13 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=not args.live_fabric, fallback_jsonl_path=args.output
         )
         published = 0
-        for _iteration in range(args.iterations):
-            events = generate_scenario_events() if args.demo else read_events(args.input)
+        demo_start = datetime.now(UTC)
+        for iteration in range(args.iterations):
+            events = (
+                generate_scenario_events(demo_start + timedelta(seconds=29 * iteration))
+                if args.demo
+                else read_events(args.input)
+            )
             for event in events:
                 sink.publish(event)
                 published += 1
