@@ -20,9 +20,9 @@
     provider: string,
     model: string,
     source: string,
-    plantName: string,
+    observation: dynamic,
     plantId: string,
-    ingestionTime: datetime
+    plantName: string
 )
 
 // Ingestion mapping for JSON payloads arriving from Eventstream
@@ -43,12 +43,14 @@
 '    {"column": "provider", "path": "$.provider"},'
 '    {"column": "model", "path": "$.model"},'
 '    {"column": "source", "path": "$.source"},'
-'    {"column": "plantName", "path": "$.plantName"},'
+'    {"column": "observation", "path": "$.observation"},'
 '    {"column": "plantId", "path": "$.plantId"},'
-'    {"column": "ingestionTime", "path": "$[\'ingestion_time\']"}'
+'    {"column": "plantName", "path": "$.plantName"}'
 ']'
 
-// 2. Reference Tables for Twin Hierarchy (Plant -> Cell -> PalletPosition)
+.alter table ProcessEventsRaw policy ingestiontime true
+
+// 2. Reference Tables for Twin Hierarchy (Plant -> Cell -> MonitoredPosition)
 .create table Plants (
     plantId: string,
     plantName: string,
@@ -63,8 +65,8 @@
     lineType: string
 )
 
-.create table PalletPositions (
-    palletPositionId: string,
+.create table MonitoredPositions (
+    positionId: string,
     cellId: string,
     positionName: string,
     monitoredSourceId: string
@@ -72,12 +74,13 @@
 
 // Seed Reference Data
 .ingest inline into table Plants <|
-demo-plant-01,Demo Plant 01,Seattle WA,2026-09-15T00:00:00Z
+demo-plant-01,Demo Plant,Seattle WA,2026-09-15T00:00:00Z
 
 .ingest inline into table Cells <|
 cell-a,demo-plant-01,Assembly Cell Alpha,Robotic Assembly
 cell-b,demo-plant-01,Packaging Cell Beta,Automated Packaging
 
-.ingest inline into table PalletPositions <|
-cell-a-pallet-position-01,cell-a,Inbound Pallet Station A1,cell-a-camera-01
-cell-b-pallet-position-01,cell-b,Outbound Pallet Station B1,cell-b-camera-01
+.ingest inline into table MonitoredPositions <|
+cell-a-object-position-01,cell-a,Object Station A1,cell-a-camera-01
+cell-b-object-position-01,cell-b,Object Station B1,cell-b-camera-01
+cell-b-pallet-position-01,cell-b,Pallet Station B1,cell-b-camera-01

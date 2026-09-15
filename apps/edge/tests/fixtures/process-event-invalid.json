@@ -1,6 +1,0 @@
-{
-  "schemaVersion": "0.1",
-  "eventId": "evt-invalid-001",
-  "eventType": "NotAProcessEvent",
-  "sourceId": "camera-01"
-}

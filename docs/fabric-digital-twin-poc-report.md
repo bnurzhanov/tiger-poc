@@ -1,3 +1,7 @@
+---
+description: Historical POC report with current detect execution commands and artifact ownership.
+---
+
 # Factory Edge Perception to Microsoft Fabric POC Report
 
 **Date:** 2026-09-15  
@@ -7,6 +11,11 @@
 ---
 
 ## Executive Summary
+
+> [!NOTE]
+> Architecture and service verification claims below describe the original POC.
+> For current contracts, setup limitations and supported commands, use the
+> [detect guide](../apps/detect/README.md) and [Fabric guide](../apps/fabric/README.md).
 
 This document details the research, architecture planning, and implementation of connecting edge manufacturing perception workloads to **Microsoft Fabric Real-Time Intelligence**. 
 
@@ -59,21 +68,21 @@ tiger-poc/
 │       └── README.md                     # IaC deployment guide
 │
 └── apps/
-    ├── detect/                           # Milestone 1 base detection app (unmodified baseline)
-    │
-    ├── edge/                             # Edge Perception & Ingestion Application
-    │   ├── pyproject.toml                # Dependencies (azure-eventhub, pyyaml, requests)
-    │   ├── README.md                     # Edge execution and simulation guide
+    ├── detect/                           # Detection, canonical contracts and optional Fabric relay
+    │   ├── pyproject.toml                # Detection dependencies and optional fabric extra
+    │   ├── README.md                     # Camera execution and Fabric relay guide
     │   ├── manifests/
-    │   │   ├── cell-a-workload.yaml      # Cell A camera, ROI, and Fabric mapping manifest
-    │   │   └── cell-b-workload.yaml      # Cell B camera, ROI, and Fabric mapping manifest
+    │   │   ├── cell-a.yaml               # Cell A household-object trial
+    │   │   ├── cell-b.yaml               # Cell B household-object trial
+    │   │   └── cell-b-pallet.yaml        # Cell B pallet model template
     │   ├── tiger_perception/
     │   │   ├── __init__.py
     │   │   ├── contracts.py              # Typed ProcessEvent and Observation dataclasses
     │   │   ├── presence.py               # Stateful presence rule (confirmation windows & suppression)
-    │   │   ├── sinks.py                  # LocalJsonlSink & FabricEventstreamSink (live + dry-run)
-    │   │   ├── replay.py                 # Multi-cell scenario simulation & replay generator
-    │   │   ├── pipeline.py               # Manifest-driven pipeline runner
+    │   │   ├── sinks.py                  # Canonical validation and LocalJsonlSink
+    │   │   ├── fabric.py                 # Fabric publisher, JSONL relay and multi-cell demo
+    │   │   ├── replay.py                 # Local event replay
+    │   │   ├── runner.py                 # Manifest-driven pipeline runner
     │   │   └── schemas/
     │   │       └── process-event-v1.json # ProcessEvent JSON Schema
     │   └── tests/                        # Full unit test suite (contracts, rules, sinks, replay)
@@ -97,20 +106,11 @@ tiger-poc/
 ## 3. Implementation Verification & Test Results
 
 ### 3.1 Unit Testing
-The test suite for `apps/edge` validates contracts, presence rules, Fabric dry-run sinks, and multi-cell event replay:
-
-```text
-platform linux -- Python 3.13.7, pytest-9.1.1, pluggy-1.6.0
-rootdir: /home/bakha/development/tiger-poc/apps/edge
-collected 9 items
-
-apps/edge/tests/test_contracts.py ...                                    [ 33%]
-apps/edge/tests/test_fabric_sink.py .                                    [ 44%]
-apps/edge/tests/test_presence_rule.py ...                                [ 77%]
-apps/edge/tests/test_replay.py ..                                        [100%]
-
-============================== 9 passed in 0.20s ===============================
-```
+The original POC recorded nine passing tests for its former standalone prototype.
+That historical result is not a verification of the current implementation.
+The supported suite in [apps/detect/tests](../apps/detect/tests) covers contracts,
+presence rules, Fabric publishing and multi-cell replay. After consolidation,
+91 tests passed locally; live Fabric delivery and KQL execution remain unverified.
 
 ### 3.2 Bicep Compilation & IaC Linting
 Bicep templates compile cleanly to ARM JSON without warnings:
@@ -157,27 +157,24 @@ EDGE_CONNECTION_STRING=$(az deployment group show \
 echo "Edge Producer Connection String: ${EDGE_CONNECTION_STRING}"
 ```
 
-### 4.2 Running Edge Tests
+### 4.2 Running Detection And Publisher Tests
 
 Run unit tests across edge contracts, presence evaluation rules, sinks, and replay generators:
 
 ```bash
-# Run tests in the edge app
-uv run --project apps/edge pytest apps/edge/tests
-
-# Run baseline tests in detect app
-uv run --project apps/detect pytest apps/detect/tests
+uv run --project apps/detect --extra fabric pytest apps/detect/tests
 ```
 
 ### 4.3 Running Edge Simulation (Dry-Run Mode)
 
-Simulate 2 manufacturing cells producing pallet occupancy transitions locally with schema validation and `.jsonl` trace output:
+Simulate cell A object and cell B pallet presence transitions locally with schema
+validation and JSONL trace output:
 
 ```bash
 # Dry-run to local file and stdout logs
-uv run --project apps/edge python apps/edge/tiger_perception/replay.py \
-  --sink both \
-  --output simulation.jsonl \
+uv run --directory apps/detect --extra fabric python -m tiger_perception.fabric \
+  --demo --dry-run \
+  --output ../../data/simulation.jsonl \
   --interval 1.0 \
   --iterations 1
 ```
@@ -191,8 +188,8 @@ Stream confirmed process events directly into Microsoft Fabric Eventstream over 
 export FABRIC_EVENTSTREAM_CONNECTION_STRING="${EDGE_CONNECTION_STRING}"
 
 # Run live streaming simulation
-uv run --project apps/edge python apps/edge/tiger_perception/replay.py \
-  --sink fabric \
+uv run --directory apps/detect --extra fabric python -m tiger_perception.fabric \
+  --demo \
   --live-fabric \
   --interval 2.0 \
   --iterations 5
@@ -200,20 +197,26 @@ uv run --project apps/edge python apps/edge/tiger_perception/replay.py \
 
 ### 4.5 Running Edge Pipeline with Workload Manifests
 
-Launch the manifest-driven perception pipeline for individual physical/simulated cell configurations:
+Launch these camera workloads in separate terminals. They write local JSONL;
+Fabric publication is a separate relay step, not a camera-runner flag.
 
 ```bash
 # Launch Cell A workload
-uv run --project apps/edge python apps/edge/tiger_perception/pipeline.py \
-  --manifest apps/edge/manifests/cell-a-workload.yaml \
-  --output detections-cell-a.jsonl \
-  --fabric
+uv run --project apps/detect apps/detect/rtsp_yolo.py \
+  --manifest apps/detect/manifests/cell-a.yaml --env-file apps/.env
 
 # Launch Cell B workload
-uv run --project apps/edge python apps/edge/tiger_perception/pipeline.py \
-  --manifest apps/edge/manifests/cell-b-workload.yaml \
-  --output detections-cell-b.jsonl \
-  --fabric
+uv run --project apps/detect apps/detect/rtsp_yolo.py \
+  --manifest apps/detect/manifests/cell-b.yaml --env-file apps/.env
+```
+
+After stopping the workloads, relay their completed event files with the destination
+configured in the process environment:
+
+```bash
+uv run --directory apps/detect --extra fabric python -m tiger_perception.fabric \
+  --input ../../data/cell-a/events.jsonl ../../data/cell-b/events.jsonl \
+  --live-fabric
 ```
 
 ### 4.6 Setting up Microsoft Fabric Eventhouse & Digital Twin

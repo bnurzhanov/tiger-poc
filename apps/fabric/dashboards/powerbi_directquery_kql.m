@@ -8,7 +8,7 @@
 // 2. Cluster URI: Enter your Fabric KQL Database Query URI (from Database Details).
 // 3. Database Name: Enter your Eventhouse / KQL Database name.
 // 4. Data Connectivity mode: Select "DirectQuery" (for sub-second / real-time updates).
-// 5. In Advanced Options, paste the M expression below or select the table "CurrentPalletOccupancy".
+// 5. In Advanced Options, paste the M expression below or select "CurrentPositionOccupancy".
 // 6. In Report View: Enable "Page refresh" in the Format pane and set duration to 5 seconds.
 // ==============================================================================
 
@@ -21,7 +21,7 @@ let
     Source = AzureDataExplorer.Contents(
         ClusterUri, 
         DatabaseName, 
-        "CurrentPalletOccupancy | join kind=leftouter (PalletPositions | join kind=inner Cells on cellId | join kind=inner Plants on plantId) on $left.subjectId == $right.palletPositionId | project Plant = plantName, Cell = cellName, Position = positionName, SubjectId = subjectId, IsOccupied = isOccupied, Status = iff(isOccupied, ""Occupied"", ""Empty""), Confidence = confidence, LastSeen = capturedAt, Camera = sourceId", 
+        "CurrentPositionOccupancy | join kind=leftouter (MonitoredPositions | join kind=inner Cells on cellId | join kind=inner Plants on plantId) on $left.subjectId == $right.positionId | project Plant = plantName, Cell = cellName, Position = positionName, SubjectId = subjectId, ObservationType = observationType, IsOccupied = isOccupied, Status = iff(isOccupied, ""Occupied"", ""Empty""), Confidence = confidence, LastSeen = capturedAt, Camera = sourceId",
         [MaxRows=null, MaxSize=null, NoTruncate=null, AdditionalSetStatements=null]
     )
 in

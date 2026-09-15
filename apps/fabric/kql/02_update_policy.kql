@@ -1,58 +1,46 @@
-// ==============================================================================
-// Microsoft Fabric Eventhouse / KQL Database - Materialized Views / Update Policy
-// Continuous Aggregation for Pallet Positions Current State
-// ==============================================================================
-
-// Table storing the latest confirmed occupancy state per pallet position
-.create table PalletPositionsLatestState (
+.create table ConfirmedPresenceEvents (
+    eventId: string,
     subjectId: string,
-    plantId: string,
-    plantName: string,
     sourceId: string,
+    observationType: string,
     isOccupied: bool,
     confidence: real,
-    lastCapturedAt: datetime,
-    lastProducedAt: datetime,
-    lastPublishedAt: datetime,
-    lastUpdated: datetime,
+    capturedAt: datetime,
+    producedAt: datetime,
+    publishedAt: datetime,
     model: string,
-    provider: string
+    provider: string,
+    observation: dynamic
 )
 
-// Ingestion transformation function
-.create-or-alter function ExtractLatestPalletState() {
+.create-or-alter function ExtractConfirmedPresence() {
     ProcessEventsRaw
-    | where observationType == "PalletPresent"
+    | where eventType == "ProcessEvent" and schemaVersion startswith "1."
+    | where observationType in ("PalletPresent", "ObjectPresent")
+    | where gettype(value) == "bool" and unit == "boolean"
+    | where isnotempty(eventId) and isnotempty(subjectId) and isnotempty(sourceId)
+    | where isnotnull(capturedAt) and isnotnull(producedAt) and isnotnull(publishedAt)
+    | where confidence between (0.0 .. 1.0)
     | project
-        subjectId = tostring(subjectId),
-        plantId = tostring(plantId),
-        plantName = tostring(plantName),
-        sourceId = tostring(sourceId),
-        isOccupied = tobool(value),
-        confidence = toreal(confidence),
-        lastCapturedAt = todatetime(capturedAt),
-        lastProducedAt = todatetime(producedAt),
-        lastPublishedAt = todatetime(publishedAt),
-        lastUpdated = now(),
-        model = tostring(model),
-        provider = tostring(provider)
-}
-
-// Materialized view to guarantee instant sub-second lookup of the current state of every position
-.create materialized-view with (backfill=true) CurrentPalletOccupancy on table ProcessEventsRaw
-{
-    ProcessEventsRaw
-    | where observationType == "PalletPresent"
-    | summarize arg_max(capturedAt, *) by subjectId
-    | project
+        eventId,
         subjectId,
-        plantId,
-        plantName,
         sourceId,
+        observationType,
         isOccupied = tobool(value),
-        confidence = toreal(confidence),
+        confidence,
         capturedAt,
+        producedAt,
         publishedAt,
         model,
-        provider
+        provider,
+        observation
+}
+
+.alter table ConfirmedPresenceEvents policy update
+@'[{"IsEnabled":true,"Source":"ProcessEventsRaw","Query":"ExtractConfirmedPresence()","IsTransactional":true,"PropagateIngestionProperties":true}]'
+
+.create materialized-view with (backfill=true) CurrentPositionOccupancy on table ConfirmedPresenceEvents
+{
+    ConfirmedPresenceEvents
+    | summarize arg_max(capturedAt, *) by subjectId
 }

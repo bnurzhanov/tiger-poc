@@ -1,8 +1,7 @@
 {
-  "$schema": "https://fabric.microsoft.com/schemas/digitaltwin/ontology-definition-v1.json",
   "name": "ManufacturingPlantTwin",
   "version": "1.0.0",
-  "description": "Digital Twin ontology modeling Plants, Cells, and Pallet Positions with streaming edge perception telemetry",
+  "description": "Design reference for manually configuring Plant, Cell and MonitoredPosition entities in Fabric; not an official import format",
   "entityTypes": [
     {
       "id": "Plant",
@@ -25,14 +24,15 @@
       ]
     },
     {
-      "id": "PalletPosition",
-      "displayName": "Pallet Position",
-      "description": "Monitored staging or storage location for pallets",
+      "id": "MonitoredPosition",
+      "displayName": "Monitored Position",
+      "description": "Object or pallet region identified by detect subjectId",
       "properties": [
-        { "name": "palletPositionId", "type": "string", "isPrimaryKey": true },
+        { "name": "positionId", "type": "string", "isPrimaryKey": true },
         { "name": "positionName", "type": "string" },
         { "name": "isOccupied", "type": "boolean" },
         { "name": "confidence", "type": "double" },
+        { "name": "observationType", "type": "string" },
         { "name": "lastObservedTimestamp", "type": "datetime" },
         { "name": "monitoredSourceId", "type": "string" }
       ]
@@ -47,22 +47,23 @@
     },
     {
       "id": "monitorsPosition",
-      "displayName": "Monitors Pallet Position",
+      "displayName": "Monitors Position",
       "sourceEntityType": "Cell",
-      "targetEntityType": "PalletPosition"
+      "targetEntityType": "MonitoredPosition"
     }
   ],
   "telemetryBindings": [
     {
-      "targetEntityType": "PalletPosition",
-      "sourceStream": "ProcessEventsRaw",
+      "targetEntityType": "MonitoredPosition",
+      "sourceStream": "CurrentPositionOccupancy",
       "mappingRule": {
         "matchProperty": "subjectId",
-        "entityPrimaryKey": "palletPositionId",
+        "entityPrimaryKey": "positionId",
         "propertyUpdates": {
-          "isOccupied": "tobool(value)",
-          "confidence": "toreal(confidence)",
-          "lastObservedTimestamp": "todatetime(capturedAt)"
+          "isOccupied": "isOccupied",
+          "confidence": "confidence",
+          "observationType": "observationType",
+          "lastObservedTimestamp": "capturedAt"
         }
       }
     }
