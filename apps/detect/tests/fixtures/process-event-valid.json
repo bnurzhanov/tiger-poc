@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0",
+  "eventId": "evt-valid-001",
+  "eventType": "ProcessEvent",
+  "sourceId": "camera-01",
+  "subjectId": "station-7",
+  "observationType": "state",
+  "value": "running",
+  "unit": "status",
+  "confidence": 0.99,
+  "capturedAt": "2026-09-15T10:00:00Z",
+  "producedAt": "2026-09-15T10:00:01Z",
+  "publishedAt": "2026-09-15T10:00:02Z",
+  "provider": "local-replay",
+  "model": "demo-model",
+  "source": "replay"
+}

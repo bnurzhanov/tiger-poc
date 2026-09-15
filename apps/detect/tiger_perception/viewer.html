@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tiger | Cell Monitor</title>
+  <style>
+    :root { color-scheme: light; --ink: #20302b; --muted: #56665e; --paper: #f3f6f4; --line: #c8d2cc; --green: #126448; --amber: #8c5900; --red: #a53035; }
+    * { box-sizing: border-box; letter-spacing: 0; }
+    body { margin: 0; color: var(--ink); background: var(--paper); font: 15px "Trebuchet MS", "DejaVu Sans", sans-serif; }
+    header { padding: 22px 28px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; background: #fff; }
+    header strong { font-size: 23px; } header span { color: var(--muted); } #clock { margin-left: auto; font-variant-numeric: tabular-nums; }
+    main { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 1800px; margin: auto; }
+    section { padding: 24px 28px; min-width: 0; } section + section { border-left: 1px solid var(--line); }
+    h1 { font-size: 19px; margin: 0 0 6px; overflow-wrap: anywhere; } .identity { color: var(--muted); font-size: 12px; margin: 0 0 16px; overflow-wrap: anywhere; }
+    .feed { position: relative; aspect-ratio: 16 / 9; background: repeating-linear-gradient(0deg, #e2e8e4, #e2e8e4 1px, #e9eeeb 1px, #e9eeeb 24px); overflow: hidden; }
+    .feed img { width: 100%; height: 100%; object-fit: contain; display: none; }
+    .feed img.loaded { display: block; } .feed .missing { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
+    .feed:has(img.loaded) .missing { display: none; }
+    .feed .stamp { position: absolute; bottom: 10px; left: 10px; right: 10px; padding: 6px 8px; background: #fff; font: 12px "DejaVu Sans Mono", monospace; overflow-wrap: anywhere; }
+    .state-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 18px 0 12px; border-bottom: 1px solid var(--line); }
+    .label { font-size: 12px; color: var(--muted); margin-bottom: 4px; } .value { font-size: 21px; font-weight: bold; }
+    .availability { font-size: 16px; text-transform: capitalize; } [data-state="current"] .availability { color: var(--green); }
+    [data-state="confirming"] .availability { color: var(--amber); } [data-state="unavailable"] .availability { color: var(--red); }
+    [data-state="unavailable"] .feed { outline: 2px solid var(--red); outline-offset: -2px; }
+    .reason { min-height: 18px; font-size: 12px; color: var(--muted); margin-top: 5px; overflow-wrap: anywhere; }
+    dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 10px; margin: 16px 0 20px; }
+    dt { color: var(--muted); font-size: 11px; } dd { margin: 5px 0 0; font: 14px "DejaVu Sans Mono", monospace; overflow-wrap: anywhere; }
+    h2 { font-size: 14px; margin: 0 0 8px; } pre { margin: 0; min-height: 90px; max-height: 290px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.65 "DejaVu Sans Mono", monospace; border-top: 2px solid var(--line); padding-top: 10px; }
+    .scenario { font-size: 12px; color: var(--amber); min-height: 20px; margin: 0 0 8px; }
+    footer { padding: 14px 28px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+    @media (max-width: 700px) { main { grid-template-columns: minmax(0, 1fr); } section { padding: 18px 16px; } section + section { border-left: 0; border-top: 1px solid var(--line); } header { padding: 18px 16px; } }
+  </style>
+</head>
+<body>
+  <header><strong>Tiger / Cell Monitor</strong><span>Local perception</span><time id="clock"></time></header>
+  <main id="cells" aria-label="Camera workloads"></main>
+  <footer id="connection" role="status">Connecting</footer>
+  <template id="cell-template">
+    <section data-state="unavailable">
+      <h1></h1><p class="identity"></p><p class="scenario"></p>
+      <div class="feed"><span class="missing">No camera image</span><img alt="Camera view with configured region and qualifying detections"><span class="stamp">No captured frame</span></div>
+      <div class="state-row"><div><div class="label">Last confirmed</div><div class="value">Unknown</div></div><div><div class="label">Evidence</div><div class="availability" role="status">Unavailable</div><div class="reason"></div></div></div>
+      <dl><div><dt>Inference</dt><dd class="latency">--</dd></div><div><dt>Processed</dt><dd class="fps">--</dd></div><div><dt>Evidence age</dt><dd class="age">--</dd></div><div><dt>Frames dropped</dt><dd class="drops">--</dd></div><div><dt>Events written</dt><dd class="events">--</dd></div><div><dt>Write failures</dt><dd class="failures">--</dd></div></dl>
+      <h2>Latest ProcessEvent</h2><pre>No confirmed event</pre>
+    </section>
+  </template>
+  <script>
+    const container = document.querySelector('#cells');
+    const template = document.querySelector('#cell-template');
+    let lastSuccess = 0;
+    let refreshing = false;
+    const text = (node, selector, value) => { node.querySelector(selector).textContent = value; };
+    const number = (value, suffix = '') => Number.isFinite(value) ? value.toFixed(1) + suffix : '--';
+    async function refresh() {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const response = await fetch('/api/cells', { signal: AbortSignal.timeout(2000) });
+        if (!response.ok) throw new Error('status unavailable');
+        const cells = await response.json();
+        cells.forEach((cell, index) => {
+          if (!container.children[index]) container.append(template.content.cloneNode(true));
+          const node = container.children[index];
+          const metrics = cell.metrics || {};
+          node.dataset.state = cell.availability;
+          text(node, 'h1', cell.name);
+          text(node, '.identity', `${cell.plantName} / ${cell.sourceId} / ${cell.subjectId}`);
+          text(node, '.scenario', cell.observationType === 'PalletPresent' ? 'Pallet presence' : `Household trial / ${cell.labels.join(', ')} / ObjectPresent`);
+          text(node, '.value', cell.lastConfirmed === null ? 'Unknown' : cell.lastConfirmed ? 'Occupied' : 'Empty');
+          text(node, '.availability', cell.availability);
+          text(node, '.reason', cell.reason || '');
+          text(node, '.stamp', (cell.availability === 'unavailable' ? 'STALE / ' : '') + (cell.capturedAt || 'No captured frame'));
+          text(node, '.latency', number(metrics.inferenceMilliseconds, ' ms'));
+          text(node, '.fps', number(metrics.processedFps, ' fps'));
+          text(node, '.age', number(cell.evidenceAgeSeconds, ' s'));
+          text(node, '.drops', metrics.droppedFrames ?? '--');
+          text(node, '.events', metrics.publishedEvents ?? '--');
+          text(node, '.failures', metrics.failedWrites ?? '--');
+          text(node, 'pre', cell.latestEvent ? JSON.stringify(cell.latestEvent, null, 2) : 'No confirmed event');
+          const image = node.querySelector('img');
+          if (cell.capturedAt && !image.dataset.loading) {
+            image.dataset.loading = 'true';
+            image.onload = () => { image.classList.add('loaded'); delete image.dataset.loading; };
+            image.onerror = () => { image.classList.remove('loaded'); delete image.dataset.loading; };
+            image.src = `/preview/${index}.jpg?t=${Date.now()}`;
+          }
+        });
+        lastSuccess = Date.now();
+        document.querySelector('#connection').textContent = `${cells.length} configured workloads / Updated ${new Date().toLocaleTimeString()}`;
+      } catch {
+        document.querySelector('#connection').textContent = 'Viewer connection unavailable';
+      } finally { refreshing = false; }
+    }
+    setInterval(() => {
+      document.querySelector('#clock').textContent = new Date().toLocaleTimeString();
+      if (Date.now() - lastSuccess > 2500) {
+        for (const node of container.children) {
+          node.dataset.state = 'unavailable';
+          text(node, '.availability', 'Unavailable');
+          text(node, '.reason', 'Viewer connection unavailable');
+          text(node, '.stamp', 'STALE / Viewer connection unavailable');
+        }
+      }
+    }, 250);
+    refresh();
+    setInterval(refresh, 500);
+  </script>
+</body>
+</html>
