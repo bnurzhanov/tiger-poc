@@ -32,6 +32,12 @@ Milestone 2 tests whether the same local event contract can populate a shared Fa
 
 ## MVP Scope
 
+The local implementation and launch commands are in the
+[detector runbook](../apps/detect/README.md). The
+[milestone 1 validation record](milestone-1-validation.md) separates software
+delivery from outstanding physical evidence. Current chair-trial manifests emit
+`ObjectPresent` and do not replace the pallet acceptance criteria below.
+
 ### Milestone 1: Local two-cell validation
 
 * One physical RTSP camera and one monitored pallet position per application instance
@@ -207,7 +213,7 @@ Use one human-readable `PerceptionWorkload` manifest per instance. The configura
 * Region matching, confidence, confirmation-window, and stale-evidence settings
 * Local output path or Fabric destination reference and ontology mappings, according to milestone
 
-The two demo manifests select different cameras, regions, subject IDs, and output files while using the same application and presence-rule implementation. Plant metadata reflects the actual deployment and may be shared when both cells belong to one plant. Final field layout and validation must be reconciled with the repository manifest before implementation; these are configuration requirements, not a runnable manifest example. Avoid a separate configuration service.
+The two demo manifests select different cameras, regions, subject IDs, and output files while using the same application and presence-rule implementation. Plant metadata reflects the actual deployment and may be shared when both cells belong to one plant. The implemented local field layout and validation are documented in the [configuration contract](../apps/detect/README.md#configuration-contract); the root manifest now describes local pallet presence and requires separately supplied pallet weights. Avoid a separate configuration service.
 
 ## Runtime And Deployment
 

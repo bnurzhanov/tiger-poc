@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from jsonschema import Draft202012Validator, FormatChecker
+
 from .contracts import ProcessEvent
 
 REQUIRED_FIELDS = (
@@ -28,7 +30,10 @@ REQUIRED_FIELDS = (
     "source",
 )
 
-SENSITIVE_KEYS = {"token", "password", "secret", "apiKey", "apikey", "key", "authorization"}
+SENSITIVE_KEYS = {"token", "password", "secret", "apikey", "key", "authorization",
+                  "uri", "url", "endpoint", "connectionstring"}
+SCHEMA = json.loads((Path(__file__).parent / "schemas/process-event-v1.json").read_text())
+VALIDATOR = Draft202012Validator(SCHEMA, format_checker=FormatChecker())
 
 
 class SinkError(ValueError):
@@ -41,13 +46,13 @@ class SinkUnavailableError(SinkError):
 
 def _redact_value(value: Any) -> Any:
     if isinstance(value, Mapping):
-        return {key: _redact_value(inner) for key, inner in value.items()}
+        return _redact_event(value)
     if isinstance(value, list):
         return [_redact_value(item) for item in value]
     if isinstance(value, tuple):
         return tuple(_redact_value(item) for item in value)
     if isinstance(value, str):
-        return "[REDACTED]" if value.lower() in {"password", "secret", "token"} else value
+        return "[REDACTED]" if value.lower() in {"password", "secret", "token"} or "://" in value else value
     return value
 
 
@@ -147,6 +152,13 @@ def validate_process_event(event: Mapping[str, Any] | ProcessEvent) -> dict[str,
             event = {**event, "sensitive": redacted}
 
     sanitized = _redact_event(dict(event))
+    error = next(VALIDATOR.iter_errors(sanitized), None)
+    if error is not None:
+        field = ".".join(map(str, error.absolute_path)) or "record"
+        raise SinkError(f"ProcessEvent schema validation failed at {field}")
+    if (sanitized["observationType"] in {"PalletPresent", "ObjectPresent"}
+            and (type(sanitized["value"]) is not bool or sanitized["unit"] != "boolean")):
+        raise SinkError("Presence value must be boolean with unit 'boolean'")
     return sanitized
 
 
@@ -180,7 +192,7 @@ class LocalJsonlSink:
             handle.flush()
             os.fsync(handle.fileno())
 
-    def publish(self, event: Mapping[str, Any]) -> bool:
+    def publish(self, event: Mapping[str, Any] | ProcessEvent) -> bool:
         """Publish a ProcessEvent to the local JSONL sink.
 
         Returns:
@@ -208,22 +220,19 @@ class LocalJsonlSink:
                 "Local JSONL sink is unavailable; retry budget exhausted before publication."
             )
 
-        for _ in range(self.max_retries):
+        for attempt in range(self.max_retries):
             try:
                 self._write_line(json.dumps(sanitized_event, separators=(",", ":"), sort_keys=True))
                 self._seen_event_ids.add(event_id)
                 self.published_count += 1
                 self.last_successful_publication = datetime.now(UTC).isoformat()
                 return True
-            except OSError as exc:
+            except OSError:
                 self.failed_count += 1
-                if not self._healthy:
+                if not self._healthy or attempt + 1 == self.max_retries:
                     raise SinkUnavailableError(
-                        f"A sink outage prevented publication of event {event_id}: {exc!s}"
-                    ) from exc
-                raise SinkError(
-                    f"Failed to write ProcessEvent {event_id}: {_sanitize_text(str(exc), sanitized_event)}"
-                ) from exc
+                        "Local JSONL write failed; retry budget exhausted. Check disk access and space."
+                    ) from None
 
         self.failed_count += 1
         raise SinkUnavailableError(

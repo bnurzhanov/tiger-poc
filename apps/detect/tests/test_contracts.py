@@ -174,3 +174,14 @@ def test_given_object_value_when_validated_then_event_is_rejected() -> None:
     # Act and assert
     with pytest.raises(SinkError, match="value"):
         validate_process_event(event)
+
+
+@pytest.mark.parametrize("field,value", [("schemaVersion", "10"), ("schemaVersion", 1),
+                                        ("value", "false"), ("unit", "count")])
+def test_given_invalid_presence_contract_when_validated_then_reject(field, value):
+    event = json.loads((FIXTURES / "process-event-valid.json").read_text())
+    event.update(observationType="PalletPresent", value=False, unit="boolean")
+    event[field] = value
+
+    with pytest.raises(SinkError):
+        validate_process_event(event)

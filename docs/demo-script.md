@@ -11,6 +11,11 @@ cells through configuration, without changing application code.
 
 Both cells answer: "Is a pallet present in the monitored position?"
 
+The [local runbook](../apps/detect/README.md) provides launch commands and a
+household chair rehearsal. Its `ObjectPresent` events are pipeline-development
+evidence, not fulfillment of this pallet recording. Check the
+[validation record](milestone-1-validation.md) before claiming milestone completion.
+
 ## Recording Prerequisites
 
 * Two physical setups, each with one pallet position and one working RTSP camera

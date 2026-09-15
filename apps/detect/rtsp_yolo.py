@@ -213,6 +213,10 @@ def run(args: argparse.Namespace) -> int:
 
 def main() -> int:
     """Run the detector and map failures to process exit codes."""
+    if any(argument == "--manifest" or argument.startswith("--manifest=") for argument in sys.argv[1:]):
+        from tiger_perception.runner import main as run_workload
+
+        return run_workload()
     args = create_parser().parse_args()
     configure_logging(args.verbose)
     try:

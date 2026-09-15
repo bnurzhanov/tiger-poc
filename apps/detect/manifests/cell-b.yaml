@@ -1,27 +1,27 @@
 apiVersion: tiger.microsoft.com/v1alpha1
 kind: PerceptionWorkload
 metadata:
-  name: cell-a-pallet-presence
+  name: cell-b-household-trial
   plantName: Demo Plant
   plantId: demo-plant-01
 spec:
   source:
-    id: cell-a-camera-01
+    id: cell-b-camera-01
     type: rtsp
-    uriFrom: CAMERA_A_RTSP_URL
-    subjectId: cell-a-pallet-position-01
+    uriFrom: CAMERA_B_RTSP_URL
+    subjectId: cell-b-object-position-01
   perception:
     provider: ultralytics
-    model: models/pallet.pt
-    labels: [pallet]
-    observationType: PalletPresent
+    model: ../yolo26n.pt
+    labels: [chair]
+    observationType: ObjectPresent
     sampleEveryFrames: 3
     device: cpu
     threads: 2
     imageSize: 640
   region:
     coordinates: normalized-xyxy
-    bounds: [0.15, 0.2, 0.85, 0.9]
+    bounds: [0.25, 0.15, 0.9, 0.85]
     matching: box-center
   presence:
     confidence: 0.5
@@ -30,5 +30,5 @@ spec:
     staleSeconds: 2.0
   destination:
     connector: local-jsonl
-    path: data/cell-a/events.jsonl
-    statusPath: data/cell-a/status.json
+    path: ../../../data/cell-b/events.jsonl
+    statusPath: ../../../data/cell-b/status.json
