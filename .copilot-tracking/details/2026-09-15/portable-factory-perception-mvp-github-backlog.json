@@ -1,0 +1,135 @@
+{
+  "format": "github-issue-backlog-v1",
+  "repository": null,
+  "source_plan": ".copilot-tracking/plans/2026-09-15/portable-factory-perception-mvp-plan.instructions.md",
+  "source_details": ".copilot-tracking/details/2026-09-15/portable-factory-perception-mvp-details.md",
+  "import_notes": {
+    "create_issues": false,
+    "usage": "Use jq to iterate issues and pass title, body, and labels to gh issue create.",
+    "dependency_metadata": "depends_on and phase are planning metadata and are not sent to GitHub.",
+    "milestone": "Set milestone after confirming the repository milestone name; it is intentionally null."
+  },
+  "issues": [
+    {
+      "key": "PFPMVP-01",
+      "order": 1,
+      "phase": "scope",
+      "title": "Define the first factory scenario and event contract",
+      "labels": ["enhancement", "planning", "priority:high"],
+      "priority": "high",
+      "milestone": null,
+      "depends_on": [],
+      "body": "## Summary\n\nResolve the conflict between the line-monitoring/Fabric proposal and the aisle-inventory/WMS manifest before implementation. Select one measurable first event, preferably a deterministic count or occupancy state, and document its identity, units, confidence semantics, event-time policy, transition semantics, and intended Fabric destination.\n\n## Acceptance criteria\n\n- One scenario, one first event, and one intended Fabric destination are named consistently.\n- `manifest.yaml` and `docs/mvp-design.md` no longer describe conflicting MVP destinations.\n- The event's subject identity, value type, units, confidence meaning, and transition behavior are documented.\n- No secret, endpoint, or credential is added to configuration or documentation.\n\n## References\n\n- `.copilot-tracking/research/2026-09-15/portable-factory-perception-mvp-research.md`\n- `manifest.yaml`\n- `docs/mvp-design.md`"
+    },
+    {
+      "key": "PFPMVP-02",
+      "order": 2,
+      "phase": "contracts",
+      "title": "Define versioned data contracts for observations and process events",
+      "labels": ["enhancement", "contracts", "priority:high"],
+      "priority": "high",
+      "milestone": null,
+      "depends_on": ["PFPMVP-01"],
+      "body": "## Summary\n\nReplace the detector's implicit JSONL format with shared data definitions for `Frame`, `RawDetection`, `RawInference`, `Observation`, `ProcessEvent`, and `Sink`. Add a versioned JSON Schema and examples of both valid and invalid events.\n\n## Acceptance criteria\n\n- The data definitions distinguish when a frame was captured, when inference produced a result, and when an event was published.\n- Events include a repeatable ID, schema version, source/provider/model details, typed values, and an explicit way to represent an unresolved subject.\n- Raw detections remain available for troubleshooting without becoming the mapper's shared input format.\n- Schema validation rejects missing IDs, invalid timestamps, unsupported value types, and invalid confidence values.\n- Serialization and negative validation tests are committed.\n\n## References\n\n- `.copilot-tracking/details/2026-09-15/portable-factory-perception-mvp-details.md`, Step 1.2\n- `apps/detect/rtsp_yolo.py`"
+    },
+    {
+      "key": "PFPMVP-03",
+      "order": 3,
+      "phase": "adapters",
+      "title": "Split capture and inference into reusable adapters",
+      "labels": ["enhancement", "adapters", "priority:high"],
+      "priority": "high",
+      "milestone": null,
+      "depends_on": ["PFPMVP-02"],
+      "body": "## Summary\n\nSeparate video capture and model inference from the current all-in-one detector. Add prerecorded replay, keep RTSP support, add a predictable fake inference provider for tests, and adapt the current YOLO path to emit `RawInference`.\n\n## Acceptance criteria\n\n- Replay and RTSP produce the same `Frame` data format.\n- The checked-in fixture or a short local clip runs without a camera or network credentials.\n- The existing `rtsp_yolo.py` command remains usable as a compatibility wrapper.\n- Replaying the same input produces the same frame sequence and capture times.\n- Work waiting between capture and inference is limited, with dropped frames or waiting behavior visible in metrics.\n\n## References\n\n- `.copilot-tracking/details/2026-09-15/portable-factory-perception-mvp-details.md`, Step 2.1\n- `apps/detect/rtsp_yolo.py`"
+    },
+    {
+      "key": "PFPMVP-04",
+      "order": 4,
+      "phase": "adapters",
+      "title": "Compare inference providers using the same replay",
+      "labels": ["enhancement", "inference", "testing", "priority:medium"],
+      "priority": "medium",
+      "milestone": null,
+      "depends_on": ["PFPMVP-03"],
+      "body": "## Summary\n\nRun the same deterministic replay through the fake provider and the current YOLO adapter, then compare the resulting process events. Verify that changing the provider does not change the data format or event identity.\n\n## Acceptance criteria\n\n- Both providers produce events that pass the shared schema for the same replay input.\n- Event IDs and event structure remain consistent.\n- Provider and model details are preserved and documented.\n- Any difference in meaning or result is clearly described in `docs/inference-provider-readiness.md`.\n- The comparison is covered by an automated test or repeatable comparison command."
+    },
+    {
+      "key": "PFPMVP-05",
+      "order": 5,
+      "phase": "mapping",
+      "title": "Turn observations into debounced process events",
+      "labels": ["enhancement", "events", "priority:high"],
+      "priority": "high",
+      "milestone": null,
+      "depends_on": ["PFPMVP-03"],
+      "body": "## Summary\n\nBuild the mapper for the selected scenario. Remember the previous state, ignore repeated identical observations for a defined period, and emit only the process changes that the scenario calls for. Each event must have a repeatable ID.\n\n## Acceptance criteria\n\n- Replaying unchanged observations does not create duplicate state-change events.\n- One state change creates exactly one repeatable event.\n- The behavior for low-confidence observations, unresolved subjects, restarts, out-of-order input, and retries is documented.\n- Tests cover repetition, transitions, restarts, ordering, and confidence handling.\n- Mapper output does not depend on the inference provider or Fabric transport.\n\n## References\n\n- `.copilot-tracking/details/2026-09-15/portable-factory-perception-mvp-details.md`, Step 3.1\n- `.copilot-tracking/research/2026-09-15/portable-factory-perception-mvp-research.md`"
+    },
+    {
+      "key": "PFPMVP-06",
+      "order": 6,
+      "phase": "local-mvp",
+      "title": "Add a schema-validating local JSONL sink",
+      "labels": ["enhancement", "reliability", "priority:high"],
+      "priority": "high",
+      "milestone": null,
+      "depends_on": ["PFPMVP-02", "PFPMVP-05"],
+      "body": "## Summary\n\nAdd the offline fallback sink for deterministic replay. Validate every `ProcessEvent` before writing, flush safely, redact secrets, expose publication counters, and provide failure and recovery tests.\n\n## Acceptance criteria\n\n- Local replay produces versioned, schema-valid ProcessEvent JSONL output.\n- Invalid events fail before publication.\n- Secrets are absent from payloads, logs, and exception text.\n- Sink outage and recovery demonstrate bounded retry behavior and no silent loss.\n- Duplicate behavior is deterministic and documented.\n- `apps/detect/README.md` documents the replay command and local fallback output."
+    },
+    {
+      "key": "PFPMVP-07",
+      "order": 7,
+      "phase": "fabric-spike",
+      "title": "Confirm how events land in Fabric Eventstream",
+      "labels": ["spike", "fabric", "priority:high"],
+      "priority": "high",
+      "milestone": null,
+      "depends_on": ["PFPMVP-02"],
+      "body": "## Summary\n\nUse the versioned `ProcessEvent` format to test one Eventstream custom-app protocol and destination. Publish ten records, inspect the destination table or storage, and record authentication, network reachability, delay, and failure behavior.\n\n## Acceptance criteria\n\n- The protocol and destination needed for Digital twin builder mapping are confirmed or explicitly blocked.\n- The destination schema, timestamp behavior, authentication method, and end-to-end delay are recorded.\n- The test uses redacted configuration inputs and does not expose credentials.\n- A repeatable publisher or documented portal procedure is captured in `docs/fabric-landing-spike.md`.\n- Production sink implementation waits until the protocol and destination are known.\n\n## Prerequisites\n\n- Fabric tenant and capacity access.\n- Digital twin builder preview enablement as required by the tenant.\n- Eventstream custom-app access."
+    },
+    {
+      "key": "PFPMVP-08",
+      "order": 8,
+      "phase": "fabric-spike",
+      "title": "Confirm Digital twin builder mapping and refresh timing",
+      "labels": ["spike", "fabric", "digital-twin", "priority:high"],
+      "priority": "high",
+      "milestone": null,
+      "depends_on": ["PFPMVP-07"],
+      "body": "## Summary\n\nManually map one stable entity ID and one property or time-series value from the confirmed Fabric destination into Digital twin builder. Run the mapping on demand and on a schedule, then record how long the update takes and which names and data types cannot be changed later.\n\n## Acceptance criteria\n\n- One complete destination-to-mapping path is demonstrated, or the exact tenant/platform blocker is recorded with evidence.\n- The first entity type, property name, data type, and stable identifier are recorded as fixed design decisions.\n- On-demand and scheduled refresh behavior is measured.\n- The five-minute demo target is reported as an observed result, not an assumption.\n- Findings are added to `docs/fabric-landing-spike.md`.\n\n## References\n\n- `.copilot-tracking/research/2026-09-15/portable-factory-perception-mvp-research.md`, Microsoft Fabric constraints"
+    },
+    {
+      "key": "PFPMVP-09",
+      "order": 9,
+      "phase": "fabric-sink",
+      "title": "Build the Fabric sink using the confirmed transport",
+      "labels": ["enhancement", "fabric", "security", "priority:high"],
+      "priority": "high",
+      "milestone": null,
+      "depends_on": ["PFPMVP-06", "PFPMVP-08"],
+      "body": "## Summary\n\nImplement only the transport selected by the Fabric landing test. Keep mapper and `ProcessEvent` code independent of Fabric while adding TLS verification, secret references, limited retries with backoff, duplicate protection, redacted structured logging, and metrics. Preserve the local JSONL fallback.\n\n## Acceptance criteria\n\n- Changing the inference provider does not change connector code or the event schema.\n- Temporary failures retry within defined limits; permanent failures remain visible and are not silently discarded.\n- Duplicate protection is tested with captured transport responses.\n- Credentials are absent from manifests, logs, payloads, and exception text.\n- Fabric sink tests cover contract validation, retries, duplicate protection, and redaction."
+    },
+    {
+      "key": "PFPMVP-10",
+      "order": 10,
+      "phase": "validation",
+      "title": "Rehearse and validate the complete local and live-camera paths",
+      "labels": ["testing", "documentation", "priority:high"],
+      "priority": "high",
+      "milestone": null,
+      "depends_on": ["PFPMVP-06", "PFPMVP-09"],
+      "body": "## Summary\n\nRun full project validation and rehearse the replay-first demo. When RTSP access is available, perform a live-camera smoke test including disconnect and reconnect behavior. Record operational metrics and close isolated validation failures.\n\n## Acceptance criteria\n\n- Contract, mapper, sink, failure, and adapter tests pass.\n- Ruff and Python compilation checks pass.\n- Local replay reaches a visible local sink in under five minutes.\n- RTSP compatibility is preserved, including documented disconnect/reconnect behavior, or the blocker is recorded.\n- Metrics identify frames read, processed, dropped, inference latency, mapper events, sink outcomes, and last successful publication.\n- Any unresolved blocker has an owner, evidence, impact, and recommended next action."
+    },
+    {
+      "key": "PFPMVP-11",
+      "order": 11,
+      "phase": "provider-readiness",
+      "title": "Assess readiness for Foundry cloud and Foundry Local",
+      "labels": ["spike", "foundry", "azure-local", "priority:medium"],
+      "priority": "medium",
+      "milestone": null,
+      "depends_on": ["PFPMVP-02", "PFPMVP-04", "PFPMVP-10"],
+      "body": "## Summary\n\nCreate and run a readiness checklist for Foundry cloud and Foundry Local on Azure Local. Keep this provider expansion separate from the local MVP until access, runtime, model, hardware, identity, TLS, and data-egress requirements are proven.\n\n## Acceptance criteria\n\n- Preview access, cluster/Kubernetes versions, gateway/TLS, identity, and network prerequisites are recorded.\n- The selected model's format, image input requirements, startup time, p50/p95 latency, throughput, and output behavior are measured where access exists.\n- Cloud and local adapters produce events that pass the shared contract and can be compared, or the difference is documented.\n- Data egress and connected/disconnected operating assumptions are documented.\n- `docs/inference-provider-readiness.md` contains a clear go/no-go decision and named blockers."
+    }
+  ]
+}

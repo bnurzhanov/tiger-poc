@@ -1,0 +1,211 @@
+from __future__ import annotations
+
+import json
+import os
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+REQUIRED_FIELDS = (
+    "schemaVersion",
+    "eventId",
+    "eventType",
+    "sourceId",
+    "subjectId",
+    "observationType",
+    "value",
+    "unit",
+    "confidence",
+    "capturedAt",
+    "producedAt",
+    "publishedAt",
+    "provider",
+    "model",
+    "source",
+)
+
+SENSITIVE_KEYS = {"token", "password", "secret", "apiKey", "apikey", "key", "authorization"}
+
+
+class SinkError(ValueError):
+    """Raised when a ProcessEvent record is invalid or cannot be persisted."""
+
+
+class SinkUnavailableError(SinkError):
+    """Raised when the sink is temporarily unavailable."""
+
+
+def _redact_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _redact_value(inner) for key, inner in value.items()}
+    if isinstance(value, list):
+        return [_redact_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_value(item) for item in value)
+    if isinstance(value, str):
+        return "[REDACTED]" if value.lower() in {"password", "secret", "token"} else value
+    return value
+
+
+def _sanitize_text(value: str, event: Mapping[str, Any] | None = None) -> str:
+    if event is None:
+        return value
+    redact_target = json.dumps(event, sort_keys=True)
+    for key, item in event.items():
+        if isinstance(item, Mapping):
+            nested = json.dumps(item, sort_keys=True)
+            if key.lower() in SENSITIVE_KEYS or any(part.lower() in SENSITIVE_KEYS for part in item):
+                return value.replace(nested, "[REDACTED]")
+        if isinstance(item, str) and key.lower() in SENSITIVE_KEYS:
+            return value.replace(item, "[REDACTED]")
+    return value.replace(redact_target, "[REDACTED]")
+
+
+def _redact_event(event: Mapping[str, Any]) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {}
+    for key, value in event.items():
+        lower_key = str(key).lower()
+        if lower_key in SENSITIVE_KEYS:
+            sanitized[key] = "[REDACTED]"
+            continue
+        sanitized[key] = _redact_value(value)
+    return sanitized
+
+
+def validate_process_event(event: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate a ProcessEvent payload before publication.
+
+    Args:
+        event: Candidate ProcessEvent dictionary.
+
+    Returns:
+        The sanitized, JSON-safe event payload.
+
+    Raises:
+        SinkError: If the record is missing required fields or is structurally invalid.
+    """
+    if not isinstance(event, Mapping):
+        raise SinkError("ProcessEvent must be a JSON object")
+
+    missing = [field for field in REQUIRED_FIELDS if field not in event]
+    if missing:
+        raise SinkError(f"Missing required ProcessEvent fields: {', '.join(missing)}")
+
+    if str(event["eventType"]) != "ProcessEvent":
+        raise SinkError("eventType must be 'ProcessEvent'")
+
+    schema_version = str(event["schemaVersion"])
+    if not schema_version.startswith("1"):
+        raise SinkError("schemaVersion must start with '1'")
+
+    for field in ("eventId", "sourceId", "subjectId", "observationType", "unit", "provider", "model", "source"):
+        value = event[field]
+        if not isinstance(value, str) or not value.strip():
+            raise SinkError(f"{field} must be a non-empty string")
+
+    confidence = event["confidence"]
+    if not isinstance(confidence, (int, float)) or not 0.0 <= float(confidence) <= 1.0:
+        raise SinkError("confidence must be a number between 0.0 and 1.0")
+
+    for field in ("capturedAt", "producedAt", "publishedAt"):
+        value = str(event[field])
+        if not value:
+            raise SinkError(f"{field} must be a non-empty timestamp")
+
+    if "sensitive" in event and isinstance(event["sensitive"], Mapping):
+        redacted = _redact_event(event["sensitive"])
+        if json.dumps(redacted, sort_keys=True) != json.dumps(event["sensitive"], sort_keys=True):
+            event = {**event, "sensitive": redacted}
+
+    sanitized = _redact_event(dict(event))
+    return sanitized
+
+
+class LocalJsonlSink:
+    """Write schema-valid ProcessEvent records to a local JSONL file.
+
+    Duplicate event IDs are treated as deterministic idempotent writes and return False
+    without emitting a second line. Failed writes increment the failure counters and raise
+    when the sink is unavailable or a record cannot be persisted.
+    """
+
+    def __init__(self, *, path: str | os.PathLike[str], max_retries: int = 3) -> None:
+        self.path = Path(path)
+        self.max_retries = max(1, max_retries)
+        self.attempted_count = 0
+        self.published_count = 0
+        self.failed_count = 0
+        self.duplicate_count = 0
+        self.last_successful_publication: str | None = None
+        self._healthy = True
+        self._seen_event_ids: set[str] = set()
+
+    def set_healthy(self, healthy: bool) -> None:
+        self._healthy = bool(healthy)
+
+    def _write_line(self, serialized_event: str) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(serialized_event)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    def publish(self, event: Mapping[str, Any]) -> bool:
+        """Publish a ProcessEvent to the local JSONL sink.
+
+        Returns:
+            True for a newly written event, False for a duplicate event ID.
+
+        Raises:
+            SinkUnavailableError: When the sink is unavailable or the retry budget is exhausted.
+            SinkError: When the event schema is invalid.
+        """
+        self.attempted_count += 1
+        try:
+            sanitized_event = validate_process_event(event)
+        except SinkError:
+            self.failed_count += 1
+            raise
+
+        event_id = str(sanitized_event["eventId"])
+        if event_id in self._seen_event_ids:
+            self.duplicate_count += 1
+            return False
+
+        if not self._healthy:
+            self.failed_count += 1
+            raise SinkUnavailableError(
+                "Local JSONL sink is unavailable; retry budget exhausted before publication."
+            )
+
+        for _ in range(self.max_retries):
+            try:
+                self._write_line(json.dumps(sanitized_event, separators=(",", ":"), sort_keys=True))
+                self._seen_event_ids.add(event_id)
+                self.published_count += 1
+                self.last_successful_publication = datetime.now(UTC).isoformat()
+                return True
+            except OSError as exc:
+                self.failed_count += 1
+                if not self._healthy:
+                    raise SinkUnavailableError(
+                        f"A sink outage prevented publication of event {event_id}: {exc!s}"
+                    ) from exc
+                raise SinkError(
+                    f"Failed to write ProcessEvent {event_id}: {_sanitize_text(str(exc), sanitized_event)}"
+                ) from exc
+
+        self.failed_count += 1
+        raise SinkUnavailableError(
+            f"Local JSONL sink retry budget exhausted for event {event_id}."
+        )
+
+
+__all__ = [
+    "LocalJsonlSink",
+    "SinkError",
+    "SinkUnavailableError",
+    "validate_process_event",
+]
