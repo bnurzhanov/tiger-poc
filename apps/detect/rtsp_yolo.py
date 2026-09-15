@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import cv2
+from tiger_perception.contracts import ProcessEvent
 from tiger_perception.sinks import LocalJsonlSink, validate_process_event
 from ultralytics import YOLO
 from ultralytics.engine.results import Results
@@ -138,24 +139,22 @@ def build_process_event(
         "detections": detections,
     }
     event_timestamp = timestamp or datetime.now(UTC).isoformat()
-    event = {
-        "schemaVersion": "1.0",
-        "eventId": event_id or f"{camera_id}-frame-{frame_number}",
-        "eventType": "ProcessEvent",
-        "sourceId": source_id or camera_id,
-        "subjectId": f"frame-{frame_number}",
-        "observationType": "object-detections",
-        "value": len(detections),
-        "unit": "detections",
-        "confidence": 1.0 if detections else 0.0,
-        "capturedAt": event_timestamp,
-        "producedAt": event_timestamp,
-        "publishedAt": event_timestamp,
-        "provider": "camera-stream",
-        "model": model_name,
-        "source": "rtsp-yolo",
-        "observation": observation,
-    }
+    event = ProcessEvent(
+        event_id=event_id or f"{camera_id}-frame-{frame_number}",
+        source_id=source_id or camera_id,
+        subject_id=f"frame-{frame_number}",
+        observation_type="object-detections",
+        value=len(detections),
+        unit="detections",
+        confidence=1.0 if detections else 0.0,
+        captured_at=event_timestamp,
+        produced_at=event_timestamp,
+        published_at=event_timestamp,
+        provider="camera-stream",
+        model=model_name,
+        source="rtsp-yolo",
+        observation=observation,
+    )
     return validate_process_event(event)
 
 

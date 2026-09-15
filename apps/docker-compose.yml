@@ -1,0 +1,10 @@
+services:
+  detect:
+    build:
+      context: ./detect
+    environment:
+      RTSP_URL: ${RTSP_URL:-rtsp://localhost:554/cam/realmonitor?channel=1&subtype=0}
+      YOLO_MODEL: ${YOLO_MODEL:-/app/yolo26n.pt}
+    volumes:
+      - ./detect/detections.jsonl:/app/detections.jsonl
+    restart: unless-stopped

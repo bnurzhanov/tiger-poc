@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from .contracts import ProcessEvent
 
 REQUIRED_FIELDS = (
     "schemaVersion",
@@ -73,11 +76,28 @@ def _redact_event(event: Mapping[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
-def validate_process_event(event: Mapping[str, Any]) -> dict[str, Any]:
+def _is_json_scalar(value: Any) -> bool:
+    if value is None or isinstance(value, (str, bool, int)):
+        return True
+    return isinstance(value, float) and math.isfinite(value)
+
+
+def _validate_timestamp(field: str, value: Any) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise SinkError(f"{field} must be a non-empty timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise SinkError(f"{field} must be an ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None:
+        raise SinkError(f"{field} must include a timezone")
+
+
+def validate_process_event(event: Mapping[str, Any] | ProcessEvent) -> dict[str, Any]:
     """Validate a ProcessEvent payload before publication.
 
     Args:
-        event: Candidate ProcessEvent dictionary.
+        event: Candidate ProcessEvent dictionary or typed ProcessEvent.
 
     Returns:
         The sanitized, JSON-safe event payload.
@@ -85,6 +105,8 @@ def validate_process_event(event: Mapping[str, Any]) -> dict[str, Any]:
     Raises:
         SinkError: If the record is missing required fields or is structurally invalid.
     """
+    if isinstance(event, ProcessEvent):
+        event = event.to_dict()
     if not isinstance(event, Mapping):
         raise SinkError("ProcessEvent must be a JSON object")
 
@@ -105,13 +127,19 @@ def validate_process_event(event: Mapping[str, Any]) -> dict[str, Any]:
             raise SinkError(f"{field} must be a non-empty string")
 
     confidence = event["confidence"]
-    if not isinstance(confidence, (int, float)) or not 0.0 <= float(confidence) <= 1.0:
+    if (
+        isinstance(confidence, bool)
+        or not isinstance(confidence, (int, float))
+        or not math.isfinite(float(confidence))
+        or not 0.0 <= float(confidence) <= 1.0
+    ):
         raise SinkError("confidence must be a number between 0.0 and 1.0")
 
     for field in ("capturedAt", "producedAt", "publishedAt"):
-        value = str(event[field])
-        if not value:
-            raise SinkError(f"{field} must be a non-empty timestamp")
+        _validate_timestamp(field, event[field])
+
+    if not _is_json_scalar(event["value"]):
+        raise SinkError("value must be a JSON scalar")
 
     if "sensitive" in event and isinstance(event["sensitive"], Mapping):
         redacted = _redact_event(event["sensitive"])

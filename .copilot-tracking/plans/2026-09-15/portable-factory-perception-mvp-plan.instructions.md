@@ -53,7 +53,7 @@ Build a contract-first, deterministic replay pipeline that normalizes frame infe
 
 * [ ] Step 1.1: Select the first line-monitoring event and reconcile manifest.yaml with the selected scope.
   * Details: .copilot-tracking/details/2026-09-15/portable-factory-perception-mvp-details.md (Lines 9-31)
-* [ ] Step 1.2: Add versioned typed contracts, JSON Schema, fixtures, and contract tests.
+* [x] Step 1.2: Add versioned typed contracts, JSON Schema, fixtures, and contract tests.
   * Details: .copilot-tracking/details/2026-09-15/portable-factory-perception-mvp-details.md (Lines 32-63)
 
 ### [ ] Implementation Phase 2: Build replay and inference adapters

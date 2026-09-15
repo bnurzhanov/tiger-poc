@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0",
+  "eventType": "ProcessEvent",
+  "sourceId": "camera-01",
+  "subjectId": "station-7",
+  "observationType": "state",
+  "value": {"unexpected": "object"},
+  "unit": "status",
+  "confidence": 1.5,
+  "capturedAt": "not-a-timestamp",
+  "producedAt": "2026-09-15T10:00:01Z",
+  "publishedAt": "2026-09-15T10:00:02Z",
+  "provider": "local-replay",
+  "model": "demo-model",
+  "source": "replay"
+}

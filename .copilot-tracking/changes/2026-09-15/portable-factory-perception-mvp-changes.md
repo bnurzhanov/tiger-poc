@@ -6,7 +6,7 @@
 
 ## Summary
 
-Completed and validated the local ProcessEvent publication slice. The detector publishes schema-valid events through the local JSONL sink, tests expose observable output, and the touched Python files now pass Ruff and compilation checks.
+Completed and validated the versioned perception contract and local ProcessEvent publication slice. Typed contracts cover frames, raw detections, raw inference, normalized observations, process events, and sinks. The detector publishes schema-valid events through the local JSONL sink, tests expose observable output, and the touched Python files pass Ruff and compilation checks.
 
 ## Changes
 
@@ -14,6 +14,10 @@ Completed and validated the local ProcessEvent publication slice. The detector p
 
 * `.copilot-tracking/reviews/2026-09-15/portable-factory-perception-mvp-review.md` - Review record for the local implementation and validation findings.
 * `.copilot-tracking/changes/2026-09-15/portable-factory-perception-mvp-changes.md` - Implementation change tracking and validation record.
+* `apps/detect/tiger_perception/contracts.py` - Typed Frame, RawDetection, RawInference, Observation, ProcessEvent, and Sink contracts.
+* `apps/detect/tests/fixtures/process-event-valid.json` - Valid ProcessEvent contract fixture.
+* `apps/detect/tests/fixtures/process-event-invalid.json` - Invalid ProcessEvent contract fixture.
+* `apps/detect/tests/test_contracts.py` - Contract serialization and negative validation tests.
 
 ### Modified
 
@@ -21,6 +25,9 @@ Completed and validated the local ProcessEvent publication slice. The detector p
 * `apps/detect/tests/test_local_jsonl_sink.py` - Sorted imports.
 * `apps/detect/tiger_perception/__init__.py` - Formatted the multiline export import.
 * `apps/detect/tiger_perception/sinks.py` - Removed the unused `Sequence` import and used explicit exception string conversion.
+* `apps/detect/tiger_perception/sinks.py` - Added timezone-aware timestamp, scalar value, finite confidence, and typed-event validation.
+* `apps/detect/tiger_perception/schemas/process-event-v1.json` - Declared date-time formats for event timestamps.
+* `apps/detect/rtsp_yolo.py` - Constructed detector events through the typed ProcessEvent model.
 
 ### Removed
 
@@ -39,6 +46,7 @@ None.
 * `uv run --project apps/detect ruff check apps/detect` - Passed.
 * `uv run --project apps/detect python -m compileall -q apps/detect` - Passed.
   * Existing third-party SyntaxWarnings were emitted from the virtual environment; no application compilation errors occurred.
+* Focused contract validation - Passed, 14 contract tests and 19 combined contract/sink tests.
 
 ## Release Summary
 
