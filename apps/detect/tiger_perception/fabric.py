@@ -230,7 +230,8 @@ def main(argv: list[str] | None = None) -> int:
                 sink.close()
             except (SinkError, OSError):
                 logger.error("Fabric client cleanup failed.")
-                exit_code = 1
+                if exit_code == 0:
+                    exit_code = 1
     return exit_code
 
 
