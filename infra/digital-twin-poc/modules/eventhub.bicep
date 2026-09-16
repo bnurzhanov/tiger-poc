@@ -15,9 +15,8 @@ param eventHubName string
 @description('Principal ID of the managed identity authorized to publish process events.')
 param producerPrincipalId string
 
-@description('SKU name for Event Hubs namespace.')
+@description('SKU name for Event Hubs namespace. Managed identity producer auth requires Standard or Premium.')
 @allowed([
-  'Basic'
   'Standard'
   'Premium'
 ])

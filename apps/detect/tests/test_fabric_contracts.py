@@ -92,7 +92,7 @@ def test_given_update_policy_when_parsed_then_transform_precedes_aggregation() -
     """Keep bool filtering out of the materialized-view aggregation definition."""
     script = (FABRIC / "kql/02_update_policy.kql").read_text()
     policy = json.loads(re.search(r"@'(\[.*\])'", script).group(1))
-    view = script.split(".create materialized-view", 1)[1]
+    view = script.split(".create async materialized-view", 1)[1]
 
     assert policy[0]["Source"] == "ProcessEventsRaw"
     assert policy[0]["Query"] == "ExtractConfirmedPresence()"
@@ -100,7 +100,18 @@ def test_given_update_policy_when_parsed_then_transform_precedes_aggregation() -
     assert 'observationType in ("PalletPresent", "ObjectPresent")' in script
     assert 'gettype(value) == "bool" and unit == "boolean"' in script
     assert "arg_max(capturedAt, *) by subjectId" in view
+    assert "async materialized-view" in script
     assert "| where" not in view and "| project" not in view
+
+
+def test_given_eventhub_contract_when_read_then_rbac_skus_require_standard_or_premium() -> None:
+    """Managed-identity producers should not advertise a Basic Event Hubs SKU."""
+    main = (Path(__file__).resolve().parents[3] / "infra" / "digital-twin-poc" / "main.bicep").read_text()
+    types = (Path(__file__).resolve().parents[3] / "infra" / "digital-twin-poc" / "types.bicep").read_text()
+
+    assert "param skuName 'Standard' | 'Premium' = 'Standard'" in main
+    assert "name: 'Standard' | 'Premium'" in types
+    assert "'Basic'" not in main and "'Basic'" not in types
 
 
 def test_given_twin_binding_when_read_then_only_confirmed_latest_state_is_used() -> None:

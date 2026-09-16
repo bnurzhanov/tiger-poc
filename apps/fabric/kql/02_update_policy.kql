@@ -39,7 +39,7 @@
 .alter table ConfirmedPresenceEvents policy update
 @'[{"IsEnabled":true,"Source":"ProcessEventsRaw","Query":"ExtractConfirmedPresence()","IsTransactional":true,"PropagateIngestionProperties":true}]'
 
-.create materialized-view with (backfill=true) CurrentPositionOccupancy on table ConfirmedPresenceEvents
+.create async materialized-view with (backfill=true) CurrentPositionOccupancy on table ConfirmedPresenceEvents
 {
     ConfirmedPresenceEvents
     | summarize arg_max(capturedAt, *) by subjectId

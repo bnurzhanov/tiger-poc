@@ -15,8 +15,8 @@ param resourceSuffix string = uniqueString(resourceGroup().id)
 @description('Base name for the factory edge ingestion resources.')
 param baseName string = 'tiger-edge'
 
-@description('Event Hubs SKU configuration.')
-param skuName 'Basic' | 'Standard' | 'Premium' = 'Standard'
+@description('Event Hubs SKU configuration. Managed identity producers require RBAC-compatible Event Hubs tiers.')
+param skuName 'Standard' | 'Premium' = 'Standard'
 
 @description('Tags applied to all provisioned resources.')
 param tags ResourceTags = {

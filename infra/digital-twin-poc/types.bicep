@@ -8,8 +8,8 @@ type Environment = 'dev' | 'test' | 'prod'
 @description('SKU configuration for Event Hubs namespace.')
 @export()
 type EventHubSku = {
-  @description('Name of the Event Hubs SKU.')
-  name: 'Basic' | 'Standard' | 'Premium'
+  @description('Name of the Event Hubs SKU. Managed identity producer auth requires Standard or Premium.')
+  name: 'Standard' | 'Premium'
   @description('Messaging capacity units.')
   capacity: int
 }
