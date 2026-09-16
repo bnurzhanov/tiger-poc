@@ -39,6 +39,8 @@ Run from the repository root with Azure CLI and Bicep installed. The deploying
 principal needs permission to create these resources and role assignments at the
 target scope, including `Microsoft.Authorization/roleAssignments/write`.
 
+NOTE: This should be a script
+
 ```bash
 RESOURCE_GROUP="rg-tiger-edge-dev"
 DEPLOYMENT_NAME="deploy-tiger-edge-$(date +%Y%m%dT%H%M%S)"
@@ -105,11 +107,4 @@ This template does not provision or populate a vault. It retains local SAS
 authentication for this fallback; do not disable it until all SAS clients have
 migrated. Continue with the [Fabric setup guide](../../apps/fabric/README.md#setup).
 
-## Existing Deployments
 
-Earlier template versions exposed sender and consumer connection strings in root
-and nested deployment histories. Review access to those histories and any logs,
-and rotate affected SAS keys with coordinated consumer updates. New outputs do
-not erase historical exposure. Incremental deployment also does not remove a
-previously created `EdgeSenderPolicy`; after migrating its clients, explicitly
-retire it through your approved change process.

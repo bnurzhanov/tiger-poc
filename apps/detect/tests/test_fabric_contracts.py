@@ -21,7 +21,8 @@ def test_given_raw_mapping_when_parsed_then_detect_fields_are_preserved() -> Non
     assert {entry["column"] for entry in mapping} == set(SCHEMA["required"]) | {
         "observation", "plantId", "plantName"
     }
-    assert all(entry["path"] == f"$.{entry['column']}" for entry in mapping)
+    assert all(entry["Properties"]["Path"] == f"$.{entry['column']}" for entry in mapping)
+    assert all("path" not in entry for entry in mapping)
     assert ".alter table ProcessEventsRaw policy ingestiontime true" in script
 
 
