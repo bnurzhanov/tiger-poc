@@ -114,9 +114,11 @@ tiger-poc/
 The original POC recorded nine passing tests for its former standalone prototype.
 That historical result is not a verification of the current implementation.
 The supported suite in [apps/detect/tests](../apps/detect/tests) covers contracts,
-presence rules, Fabric publishing and multi-cell replay. After the review fixes,
-96 tests passed locally, including root-manifest identity coverage, historical
-demo timestamps, relay error diagnostics and both publisher authentication paths.
+presence rules, Fabric publishing and multi-cell replay. On 2026-09-15,
+`cd apps/detect && uv run pytest tests -q` passed 102 tests at base commit
+`4983ff49610f3b1c13a614ab144d417f3ed7df3f` with the review fixes in the
+working tree. Coverage includes root-manifest identity, historical demo timestamps,
+relay error diagnostics and both publisher authentication paths.
 Live Fabric delivery and KQL execution remain unverified.
 
 ### 3.2 Bicep Compilation & IaC Linting

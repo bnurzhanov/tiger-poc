@@ -88,16 +88,14 @@ class FabricEventstreamSink:
 
         try:
             from azure.core.exceptions import AzureError
-        except ImportError:
-            raise SinkUnavailableError("Install the detect project's 'fabric' extra for live publishing.") from None
-
-        try:
             from azure.eventhub import EventData
 
             producer = self._get_eventhub_producer()
             batch = producer.create_batch(partition_key=validated["subjectId"])
             batch.add(EventData(json.dumps(validated)))
             producer.send_batch(batch)
+        except ImportError:
+            raise SinkUnavailableError("Install the detect project's 'fabric' extra for live publishing.") from None
         except (AzureError, OSError, ValueError):
             raise SinkUnavailableError(
                 "Fabric publication failed; verify destination, credentials, permissions and connectivity."

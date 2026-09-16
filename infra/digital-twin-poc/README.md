@@ -54,7 +54,7 @@ az deployment group create \
 az deployment group show \
         --name "$DEPLOYMENT_NAME" \
         --resource-group "$RESOURCE_GROUP" \
-        --query 'properties.outputs.{namespace:eventHubNamespaceHostname.value,hub:eventHubName.value,clientId:managedIdentityClientId.value,identityResourceId:managedIdentityResourceId.value}' \
+        --query 'properties.outputs.{namespace:eventHubNamespaceHostname.value,hub:eventHubName.value,eventHubId:eventHubId.value,clientId:managedIdentityClientId.value,identityResourceId:managedIdentityResourceId.value}' \
         --output json
 ```
 

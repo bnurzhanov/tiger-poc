@@ -1,5 +1,6 @@
 """Regression coverage for edge functionality migrated into detect."""
 
+import builtins
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -139,10 +140,40 @@ def test_given_invalid_presence_when_published_then_detect_rejects(value: Any, u
         relay.FabricEventstreamSink(dry_run=True).publish(event)
 
 
+def test_given_non_json_extension_when_published_then_fabric_rejects() -> None:
+    """Reject extension values that Event Hubs cannot serialize."""
+    event = {**relay.generate_scenario_events()[0], "observation": {"labels": {"person"}}}
+
+    with pytest.raises(SinkError, match="JSON-serializable"):
+        relay.FabricEventstreamSink(dry_run=True).publish(event)
+
+
 def test_given_missing_destination_when_live_then_fail_closed() -> None:
     """Live publication cannot silently become a dry run."""
     with pytest.raises(SinkError, match="requires an Event Hubs destination"):
         relay.FabricEventstreamSink()
+
+
+@pytest.mark.parametrize("missing_module", ["azure.eventhub", "azure.identity"])
+def test_given_partial_azure_install_when_published_then_report_unavailable(
+    monkeypatch: pytest.MonkeyPatch, missing_module: str,
+) -> None:
+    """Keep every optional Azure import inside the controlled failure path."""
+    pytest.importorskip("azure.core")
+    real_import = builtins.__import__
+
+    def import_without_optional_module(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == missing_module:
+            raise ImportError(f"No module named {name}")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_optional_module)
+    sink = relay.FabricEventstreamSink(
+        namespace="test.servicebus.windows.net", eventhub_name="events"
+    )
+
+    with pytest.raises(SinkUnavailableError, match="fabric.*extra"):
+        sink.publish(relay.generate_scenario_events()[0])
 
 
 @pytest.mark.parametrize("authentication", ["connection_string", "namespace"])

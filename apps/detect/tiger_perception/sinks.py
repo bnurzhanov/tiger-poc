@@ -146,12 +146,12 @@ def validate_process_event(event: Mapping[str, Any] | ProcessEvent) -> dict[str,
     if not _is_json_scalar(event["value"]):
         raise SinkError("value must be a JSON scalar")
 
-    if "sensitive" in event and isinstance(event["sensitive"], Mapping):
-        redacted = _redact_event(event["sensitive"])
-        if json.dumps(redacted, sort_keys=True) != json.dumps(event["sensitive"], sort_keys=True):
-            event = {**event, "sensitive": redacted}
-
     sanitized = _redact_event(dict(event))
+    try:
+        json.dumps(sanitized, allow_nan=False)
+    except (TypeError, ValueError):
+        raise SinkError("ProcessEvent must contain only JSON-serializable values") from None
+
     error = next(VALIDATOR.iter_errors(sanitized), None)
     if error is not None:
         field = ".".join(map(str, error.absolute_path)) or "record"
