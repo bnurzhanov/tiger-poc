@@ -1,0 +1,28 @@
+{
+  "sources": [{
+    "name": "CameraEvents",
+    "type": "CustomEndpoint",
+    "properties": {"inputSerialization": {"type": "Json", "properties": {"encoding": "UTF8"}}}
+  }],
+  "streams": [{
+    "name": "ProcessEventsStream",
+    "type": "DefaultStream",
+    "properties": {},
+    "inputNodes": [{"name": "CameraEvents"}]
+  }],
+  "operators": [],
+  "destinations": [{
+    "name": "ProcessEventsDestination",
+    "type": "Eventhouse",
+    "properties": {
+      "dataIngestionMode": "ProcessedIngestion",
+      "workspaceId": "${workspaceId}",
+      "itemId": "${databaseId}",
+      "databaseName": "${databaseName}",
+      "tableName": "ProcessEventsRaw",
+      "inputSerialization": {"type": "Json", "properties": {"encoding": "UTF8"}}
+    },
+    "inputNodes": [{"name": "ProcessEventsStream"}]
+  }],
+  "compatibilityLevel": "1.1"
+}

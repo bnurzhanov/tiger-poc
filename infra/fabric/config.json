@@ -1,0 +1,7 @@
+{
+  "prefix": "tiger",
+  "artifactRoot": "../../apps/fabric",
+  "observationTypes": ["ObjectPresent", "PalletPresent"],
+  "targetLatencyMinutes": 5,
+  "flowJobType": null
+}

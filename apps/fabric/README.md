@@ -48,6 +48,13 @@ Fabric Eventstream (Custom App source / Event Hubs)
 
 ## Setup
 
+For a new or manually cleared workspace, the
+[signed-in bootstrap](../../infra/fabric/README.md) creates Fabric items from these
+KQL and twin artifacts with your Azure CLI user identity. It preserves the detect
+relay as the publisher. The bootstrap is offline-tested; preview mapping execution,
+connection details, and dashboard configuration still require explicit validation
+or portal steps. The following sections remain the manual setup alternative.
+
 ### Create The Eventhouse
 
 You need a Fabric workspace assigned to a

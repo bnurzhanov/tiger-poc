@@ -1,0 +1,589 @@
+"""Offline checks for the Fabric deployment artifacts and orchestration."""
+
+import csv
+import io
+import json
+import re
+from pathlib import Path
+from uuid import NAMESPACE_URL, uuid5
+
+import httpx
+import pytest
+
+from infra.fabric.artifacts import (
+    database_schema,
+    load_config,
+    reference_ingest,
+    reference_tables,
+    twin_definition,
+)
+from infra.fabric.deploy import (
+    Deployment,
+    DeploymentError,
+    FabricClient,
+    encode_definition,
+    main,
+)
+
+ROOT = Path(__file__).resolve().parents[3]
+DEFINITIONS = ROOT / "infra/fabric/definitions"
+
+
+def test_given_canonical_kql_when_compiled_then_schema_and_presence_policy_are_preserved() -> (
+    None
+):
+    config = load_config(ROOT / "infra/fabric/config.json")
+
+    schema = database_schema(config)
+
+    assert "value: dynamic" in schema
+    assert 'gettype(value) == "bool"' in schema
+    assert '"IsTransactional":true' in schema
+    assert ".create-or-alter materialized-view CurrentPositionOccupancy" in schema
+    assert ".ingest inline" not in schema
+    assert ".show tables" not in schema
+
+
+def test_given_schema_when_submitted_then_only_fabric_supported_commands_are_used() -> (
+    None
+):
+    config = load_config(ROOT / "infra/fabric/config.json")
+
+    schema = database_schema(config)
+    command_lines = re.findall(r"^\..*$", schema, re.MULTILINE)
+
+    assert len(command_lines) == 9
+    assert all(
+        re.match(
+            r"\.(create-merge table |create-or-alter function |"
+            r"create-or-alter materialized-view |"
+            r"alter table \w+ policy update|create table \w+ ingestion json mapping )",
+            command,
+        )
+        for command in command_lines
+    )
+    assert "policy ingestiontime" not in schema
+
+
+def test_given_reference_seed_when_compiled_then_data_is_replaced_not_appended() -> (
+    None
+):
+    config = load_config(ROOT / "infra/fabric/config.json")
+
+    command = reference_ingest(config, "Plants", reference_tables(config)["Plants"])
+
+    assert command.startswith(".set-or-replace Plants <|")
+    assert '"Seattle, WA"' in command
+    assert "datetime(2026-09-15T00:00:00+00:00)" in command
+
+
+def test_given_multiline_kql_when_compiled_then_blank_lines_preserve_commands(
+    tmp_path,
+) -> None:
+    config = load_config(ROOT / "infra/fabric/config.json")
+    source = Path(config["artifactRoot"]) / "kql"
+    destination = tmp_path / "kql"
+    destination.mkdir()
+    for filename in ("01_create_tables.kql", "02_update_policy.kql"):
+        content = (
+            (source / filename)
+            .read_text()
+            .replace("    | where gettype(value)", "\n    | where gettype(value)")
+        )
+        (destination / filename).write_text(content)
+    config["artifactRoot"] = str(tmp_path)
+
+    schema = database_schema(config)
+
+    assert '\n\n    | where gettype(value) == "bool"' in schema
+    assert '"Properties": {"Path": "$.eventId"}' in schema
+    assert "| summarize arg_max(capturedAt, *) by subjectId" in schema
+
+
+def test_given_canonical_instances_when_reference_tables_rendered_then_metadata_matches() -> (
+    None
+):
+    config = load_config(ROOT / "infra/fabric/config.json")
+    instances = json.loads(
+        (Path(config["artifactRoot"]) / "digital_twin/twin_instances.json").read_text()
+    )
+
+    tables = reference_tables(config)
+
+    for table, collection in (
+        ("Plants", "plants"),
+        ("Cells", "cells"),
+        ("MonitoredPositions", "monitoredPositions"),
+    ):
+        rows = list(csv.DictReader(io.StringIO(tables[table])))
+        columns = set(rows[0]) - {"createdTimestamp"}
+        assert [{key: row[key] for key in sorted(columns)} for row in rows] == [
+            {key: instance[key] for key in sorted(columns)}
+            for instance in instances[collection]
+        ]
+
+
+def make_client(responses: list[httpx.Response]) -> FabricClient:
+    """Create a transport that consumes deterministic responses without waiting."""
+    return FabricClient(
+        httpx.Client(transport=httpx.MockTransport(lambda request: responses.pop(0))),
+        lambda scope: "test-token",
+        pause=lambda seconds: None,
+    )
+
+
+def test_given_json_definition_when_encoded_then_parts_round_trip() -> None:
+    import base64
+
+    parts = encode_definition({"definition.json": {"LakehouseId": "test"}})["parts"]
+
+    assert json.loads(base64.b64decode(parts[0]["payload"])) == {"LakehouseId": "test"}
+
+
+def test_given_async_create_when_completed_then_result_is_fetched() -> None:
+    client = make_client(
+        [
+            httpx.Response(200, json={"status": "Running"}),
+            httpx.Response(200, json={"status": "Succeeded"}),
+            httpx.Response(200, json={"id": "created-item"}),
+        ]
+    )
+
+    result = client.finish(
+        httpx.Response(
+            202,
+            headers={"Location": "https://api.fabric.microsoft.com/v1/operations/one"},
+        ),
+        result=True,
+    )
+
+    assert result == {"id": "created-item"}
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "http://api.fabric.microsoft.com/v1/operations/redirected",
+        "https://regional.example.net/v1/operations/redirected",
+        "https://wabi-us-central-b-primary-redirect.analysis.windows.net/v1/operations/redirected",
+    ],
+)
+def test_given_operation_id_when_location_untrusted_then_public_api_is_used(
+    location: str,
+) -> None:
+    operation = "00000000-0000-4000-8000-000000000010"
+    requests = []
+    responses = [
+        httpx.Response(
+            200, headers={"Location": location}, json={"status": "Succeeded"}
+        ),
+        httpx.Response(200, json={"id": "created-item"}),
+    ]
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        return responses.pop(0)
+
+    client = FabricClient(
+        httpx.Client(transport=httpx.MockTransport(respond)),
+        lambda scope: "test-token",
+        pause=lambda seconds: None,
+    )
+
+    result = client.finish(
+        httpx.Response(
+            202, headers={"Location": location, "x-ms-operation-id": operation}
+        ),
+        result=True,
+    )
+
+    assert result == {"id": "created-item"}
+    assert requests == [
+        f"https://api.fabric.microsoft.com/v1/operations/{operation}",
+        f"https://api.fabric.microsoft.com/v1/operations/{operation}/result",
+    ]
+
+
+@pytest.mark.parametrize(
+    "operation_id", ["not-a-guid", "../workspaces", "https://example.com"]
+)
+def test_given_invalid_operation_id_when_polled_then_no_request_is_sent(
+    operation_id: str,
+) -> None:
+    client = make_client([])
+
+    with pytest.raises(DeploymentError, match="invalid operation ID"):
+        client.finish(httpx.Response(202, headers={"x-ms-operation-id": operation_id}))
+
+
+def test_given_untrusted_location_without_id_when_polled_then_request_is_rejected() -> (
+    None
+):
+    client = make_client([])
+
+    with pytest.raises(DeploymentError, match="untrusted"):
+        client.finish(
+            httpx.Response(202, headers={"Location": "https://example.com/operation"})
+        )
+
+
+def test_given_failed_operation_when_polled_then_deployment_stops() -> None:
+    client = make_client([httpx.Response(200, json={"status": "Failed"})])
+
+    with pytest.raises(DeploymentError, match="Failed"):
+        client.finish(
+            httpx.Response(
+                202,
+                headers={"x-ms-operation-id": "00000000-0000-4000-8000-000000000010"},
+            )
+        )
+
+
+def test_given_service_error_when_operation_fails_then_code_is_reported_without_message() -> (
+    None
+):
+    client = make_client(
+        [
+            httpx.Response(
+                200,
+                json={
+                    "status": "Failed",
+                    "error": {
+                        "errorCode": "ScriptContainsUnsupportedCommand",
+                        "message": "private payload",
+                    },
+                },
+            )
+        ]
+    )
+
+    with pytest.raises(
+        DeploymentError, match="ScriptContainsUnsupportedCommand"
+    ) as failure:
+        client.finish(
+            httpx.Response(
+                202,
+                headers={"x-ms-operation-id": "00000000-0000-4000-8000-000000000010"},
+            )
+        )
+
+    assert "private payload" not in str(failure.value)
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://example.com/token", "http://api.fabric.microsoft.com/v1/operations/one"],
+)
+def test_given_untrusted_url_when_requested_then_token_is_not_sent(url: str) -> None:
+    client = make_client([])
+
+    with pytest.raises(DeploymentError, match="untrusted"):
+        client.request("GET", url)
+
+
+def test_given_paginated_items_when_listed_then_all_pages_are_returned() -> None:
+    client = make_client(
+        [
+            httpx.Response(
+                200,
+                json={
+                    "value": [{"id": "one"}],
+                    "continuationUri": "https://api.fabric.microsoft.com/v1/workspaces/test/items?page=2",
+                },
+            ),
+            httpx.Response(200, json={"value": [{"id": "two"}]}),
+        ]
+    )
+
+    assert client.items("test") == [{"id": "one"}, {"id": "two"}]
+
+
+def test_given_throttling_when_retried_then_request_can_complete() -> None:
+    client = make_client(
+        [
+            httpx.Response(429, headers={"Retry-After": "1"}),
+            httpx.Response(200, json={}),
+        ]
+    )
+
+    assert client.request("GET", "workspaces").status_code == 200
+
+
+def test_given_merged_reference_when_rendered_then_stable_ids_are_preserved() -> None:
+    config = load_config(ROOT / "infra/fabric/config.json")
+
+    tables = reference_tables(config)
+
+    assert "cell-a-object-position-01" in tables["MonitoredPositions"]
+    assert "cell-b-pallet-position-01" in tables["MonitoredPositions"]
+    assert "demo-plant-01" in tables["Plants"]
+    assert "cell-a,demo-plant-01" in tables["Cells"]
+
+
+def test_given_model_when_rendered_then_links_and_flow_groups_are_consistent() -> None:
+    config = load_config(ROOT / "infra/fabric/config.json")
+
+    parts, groups = twin_definition(config, "workspace", "source", "backing")
+    mappings = [
+        part for path, part in parts.items() if path.startswith("MappingOperations/")
+    ]
+    timeseries = next(
+        part
+        for part in mappings
+        if part["MappingOperationProperties"]["MappingType"] == "TimeSeries"
+    )
+
+    assert parts["definition.json"]["LakehouseId"] == "backing"
+    assert len(groups["reference"]) == 3
+    assert all(part["SourceTableProperties"]["ItemId"] == "source" for part in mappings)
+    assert timeseries["MappingOperationProperties"][
+        "TimeseriesEntityLinkProperties"
+    ] == {"EntityProperty": "positionId", "TimeseriesProperty": "subjectId"}
+    assert (
+        timeseries["SourceTableProperties"]["SourceTableName"]
+        == "ConfirmedPresenceEvents"
+    )
+    assert {
+        "SourceColumn": "capturedAt",
+        "EntityTypePropertyName": "Timestamp",
+    } in timeseries["MappingOperationProperties"]["MappedProperties"]
+    assert parts == twin_definition(config, "workspace", "source", "backing")[0]
+
+
+def test_given_plan_when_run_then_no_authentication_is_needed(capsys) -> None:
+    result = main(["plan"])
+
+    assert result == 0
+    assert json.loads(capsys.readouterr().out)["mode"] == "offline; no cloud calls"
+
+
+def test_given_name_collision_when_preflight_runs_then_no_resource_is_created(
+    tmp_path,
+) -> None:
+    client = make_client(
+        [
+            httpx.Response(200, json={"capacityId": "capacity"}),
+            httpx.Response(
+                200,
+                json={
+                    "value": [
+                        {
+                            "id": "foreign",
+                            "type": "Eventhouse",
+                            "displayName": "tiger_events",
+                        }
+                    ]
+                },
+            ),
+        ]
+    )
+    deployment = Deployment(
+        client,
+        load_config(ROOT / "infra/fabric/config.json"),
+        "00000000-0000-4000-8000-000000000001",
+        tmp_path / "state.json",
+    )
+
+    with pytest.raises(DeploymentError, match="Name collision"):
+        deployment.preflight()
+
+
+def test_given_saved_workspace_when_different_workspace_selected_then_resume_rejected(
+    tmp_path,
+) -> None:
+    config = load_config(ROOT / "infra/fabric/config.json")
+    state = tmp_path / "state.json"
+    Deployment(
+        make_client([]), config, "00000000-0000-4000-8000-000000000001", state
+    ).save()
+
+    with pytest.raises(DeploymentError, match="State does not match"):
+        Deployment(
+            make_client([]), config, "00000000-0000-4000-8000-000000000002", state
+        )
+
+
+def test_given_empty_workspace_when_applied_twice_then_second_run_creates_nothing(
+    tmp_path,
+) -> None:
+    requests = []
+    items = []
+    uploads = []
+    workspace = "00000000-0000-4000-8000-000000000001"
+    kinds = {
+        "eventhouses": "Eventhouse",
+        "kqlDatabases": "KQLDatabase",
+        "lakehouses": "Lakehouse",
+        "eventstreams": "Eventstream",
+        "digitalTwinBuilders": "DigitalTwinBuilder",
+        "digitalTwinBuilderFlows": "DigitalTwinBuilderFlow",
+    }
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = request.url.path
+        if request.method == "GET" and path.endswith(f"workspaces/{workspace}"):
+            return httpx.Response(200, json={"capacityId": "capacity"})
+        if request.method == "GET" and path.endswith("/items"):
+            return httpx.Response(200, json={"value": items})
+        if request.method == "GET" and "/kqlDatabases/" in path:
+            return httpx.Response(
+                200,
+                json={
+                    "displayName": "tiger_events_db",
+                    "properties": {
+                        "queryServiceUri": "https://test.kusto.fabric.microsoft.com"
+                    },
+                },
+            )
+        if request.method == "POST" and path.endswith("/v1/rest/mgmt"):
+            return httpx.Response(200, json={"Tables": []})
+        if request.method == "POST" and path.endswith("/load"):
+            return httpx.Response(
+                202,
+                headers={
+                    "Location": "https://api.fabric.microsoft.com/v1/operations/load"
+                },
+            )
+        if path == "/v1/operations/load":
+            return httpx.Response(200, json={"status": "Succeeded"})
+        if request.method == "POST" and path.endswith("/shortcuts"):
+            return httpx.Response(201, json={})
+        if request.method == "POST" and path.split("/")[-1] in kinds:
+            payload = json.loads(request.content)
+            item = {
+                "id": str(uuid5(NAMESPACE_URL, payload["displayName"])),
+                "type": kinds[path.split("/")[-1]],
+                "displayName": payload["displayName"],
+            }
+            items.append(item)
+            return httpx.Response(201, json=item)
+        pytest.fail(f"Unexpected request: {request.method} {path}")
+
+    client = FabricClient(
+        httpx.Client(transport=httpx.MockTransport(respond)),
+        lambda scope: "test",
+        pause=lambda seconds: None,
+    )
+    config = load_config(ROOT / "infra/fabric/config.json")
+    state = tmp_path / "state.json"
+    deployment = Deployment(client, config, workspace, state)
+
+    deployment.apply(lambda lakehouse, path, content: uploads.append((path, content)))
+    first_requests = requests.copy()
+    requests.clear()
+    Deployment(client, config, workspace, state).apply(
+        lambda *args: pytest.fail("Unexpected upload on resume")
+    )
+
+    assert len(items) == 9
+    assert len(uploads) == 3
+    assert all(request.method == "GET" for request in requests)
+    assert not any("/jobs/" in request.url.path for request in first_requests)
+    policy_requests = [
+        request
+        for request in first_requests
+        if request.url.path == "/v1/rest/mgmt"
+        and json.loads(request.content)["csl"]
+        == ".alter table ProcessEventsRaw policy ingestiontime true"
+    ]
+    assert len(policy_requests) == 1
+    assert "ingestion_time" in deployment.state["completed"]
+    eventstream_request = next(
+        request
+        for request in first_requests
+        if request.url.path.endswith("/eventstreams")
+    )
+    assert first_requests.index(policy_requests[0]) < first_requests.index(
+        eventstream_request
+    )
+    eventstream = next(
+        json.loads(request.content)
+        for request in first_requests
+        if request.url.path.endswith("/eventstreams")
+    )
+    import base64
+
+    topology = json.loads(
+        base64.b64decode(eventstream["definition"]["parts"][0]["payload"])
+    )
+    assert (
+        topology["destinations"][0]["properties"]["itemId"]
+        == deployment.state["items"]["database"]
+    )
+    assert topology["destinations"][0]["properties"]["tableName"] == "ProcessEventsRaw"
+
+
+@pytest.mark.parametrize("connection_error", [httpx.ConnectError, httpx.ConnectTimeout])
+def test_given_kql_connection_failure_when_configuring_then_checkpoint_is_not_completed(
+    tmp_path,
+    connection_error,
+) -> None:
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "displayName": "tiger_events_db",
+                    "properties": {
+                        "queryServiceUri": "https://test.kusto.fabric.microsoft.com"
+                    },
+                },
+            )
+        raise connection_error("private transport details", request=request)
+
+    client = FabricClient(
+        httpx.Client(transport=httpx.MockTransport(respond)), lambda scope: "test-token"
+    )
+    deployment = Deployment(
+        client,
+        load_config(ROOT / "infra/fabric/config.json"),
+        "00000000-0000-4000-8000-000000000001",
+        tmp_path / "state.json",
+    )
+    deployment.state["items"]["database"] = "database"
+
+    with pytest.raises(
+        DeploymentError, match="test.kusto.fabric.microsoft.com:443"
+    ) as failure:
+        deployment.once(
+            "ingestion_time",
+            lambda: deployment.kql(
+                ".alter table ProcessEventsRaw policy ingestiontime true"
+            ),
+        )
+
+    assert deployment.state["completed"] == []
+    assert "private transport details" not in str(failure.value)
+
+
+def test_given_unconfirmed_job_type_when_run_requested_then_fails_before_authentication() -> (
+    None
+):
+    assert main(["run"]) == 2
+
+
+def test_given_deduped_job_when_polled_then_not_reported_as_completed(tmp_path) -> None:
+    client = make_client(
+        [
+            httpx.Response(
+                202,
+                headers={
+                    "Location": "https://api.fabric.microsoft.com/v1/workspaces/test/items/flow/jobs/instances/one"
+                },
+            ),
+            httpx.Response(200, json={"status": "Deduped"}),
+        ]
+    )
+    deployment = Deployment(
+        client,
+        load_config(ROOT / "infra/fabric/config.json"),
+        "00000000-0000-4000-8000-000000000001",
+        tmp_path / "state.json",
+    )
+    deployment.state["items"]["flow_reference"] = "flow"
+
+    with pytest.raises(DeploymentError, match="Deduped"):
+        deployment.run_flow("reference", "ConfirmedJobType")
+
+    assert deployment.state["jobs"]["reference"]["status"] == "Deduped"
