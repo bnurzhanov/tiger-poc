@@ -1,5 +1,6 @@
 """Local artifact contract checks; these do not replace execution in a KQL database."""
 
+import csv
 import json
 import re
 from pathlib import Path
@@ -22,6 +23,45 @@ def test_given_raw_mapping_when_parsed_then_detect_fields_are_preserved() -> Non
     }
     assert all(entry["path"] == f"$.{entry['column']}" for entry in mapping)
     assert ".alter table ProcessEventsRaw policy ingestiontime true" in script
+
+
+def test_given_plant_seed_when_parsed_then_twin_metadata_matches() -> None:
+    """Keep CSV seed metadata aligned with the manually configured twin."""
+    script = (FABRIC / "kql/01_create_tables.kql").read_text()
+    instances = json.loads((FABRIC / "digital_twin/twin_instances.json").read_text())
+    seed = script.split(".ingest inline into table Plants <|", 1)[1]
+    seed = seed.strip().split("\n\n", 1)[0]
+
+    rows = list(csv.reader(seed.splitlines()))
+
+    assert all(len(row) == 4 for row in rows)
+    assert {tuple(row[:3]) for row in rows} == {
+        (plant["plantId"], plant["plantName"], plant["location"])
+        for plant in instances["plants"]
+    }
+
+
+def test_given_occupancy_queries_when_no_positions_then_rate_is_unknown() -> None:
+    """Require explicit typed null guards in the shipped KQL rate expressions."""
+    dashboard = json.loads((FABRIC / "dashboards/fabric_realtime_dashboard.json").read_text())
+    samples = (FABRIC / "kql/03_sample_queries.kql").read_text()
+
+    rate_query = next(
+        tile["query"] for tile in dashboard["tiles"]
+        if tile["id"] == "tile-occupancy-rate"
+    )
+    sample_query = samples.split("// Query 2:", 1)[1].split("// Query 3:", 1)[0]
+    guarded_rate = (
+        "iff(TotalPositions == 0, real(null), "
+        "round(100.0 * OccupiedCount / TotalPositions, 1))"
+    )
+
+    for query in (rate_query, sample_query):
+        assert "TotalPositions = count()" in query
+        assert "OccupiedCount = countif(isOccupied == true)" in query
+        assert guarded_rate in query
+    assert f"| project Rate = {guarded_rate}" in rate_query
+    assert f"| extend OccupancyRate = {guarded_rate}" in sample_query
 
 
 def test_given_detect_manifests_when_joined_then_reference_identities_match() -> None:

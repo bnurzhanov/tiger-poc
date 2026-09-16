@@ -32,7 +32,7 @@
       "id": "tile-occupancy-rate",
       "title": "Occupancy Rate (%)",
       "visualType": "stat",
-      "query": "CurrentPositionOccupancy | summarize Rate = round(100.0 * countif(isOccupied == true) / count(), 1)",
+      "query": "CurrentPositionOccupancy | summarize TotalPositions = count(), OccupiedCount = countif(isOccupied == true) | project Rate = iff(TotalPositions == 0, real(null), round(100.0 * OccupiedCount / TotalPositions, 1))",
       "size": { "width": 3, "height": 2 },
       "position": { "row": 0, "col": 9 }
     },

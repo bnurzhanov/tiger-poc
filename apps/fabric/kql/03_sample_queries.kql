@@ -26,8 +26,8 @@ CurrentPositionOccupancy
 | summarize
     TotalPositions = count(),
     OccupiedCount = countif(isOccupied == true),
-    EmptyCount = countif(isOccupied == false),
-    OccupancyRate = round(100.0 * countif(isOccupied == true) / count(), 1)
+    EmptyCount = countif(isOccupied == false)
+| extend OccupancyRate = iff(TotalPositions == 0, real(null), round(100.0 * OccupiedCount / TotalPositions, 1))
 
 // Query 3: Transition Timeline (Last 24 hours of transitions across cells)
 ConfirmedPresenceEvents
