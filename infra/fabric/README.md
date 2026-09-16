@@ -24,8 +24,10 @@ an alternative transport, not a prerequisite for this Custom App source setup.
 The bootstrap does not create a second publisher or use the standalone jeep CSV.
 
 > [!IMPORTANT]
-> This implementation has offline tests, not a successful live Fabric deployment.
-> Public preview definitions are available, but a supported
+> Definition deployment and twin definition read-back have been verified live.
+> The twin was validated through staged create/update imports; a fresh, single-request
+> import of the corrected definition has not yet been exercised. End-to-end event
+> ingestion and mapping execution remain unverified. A supported
 > `DigitalTwinBuilderFlow` job type has not been established. `apply` creates
 > definitions and reference data; it does not initialize twin instances or run
 > mappings. Eventstream connection details and flow execution still require
@@ -149,7 +151,8 @@ is replaced. Reference metadata stays aligned with the shipped instance JSON.
 The renderer converts the design reference into public Fabric definition parts.
 It adds `plantId` to Cell and `cellId` to MonitoredPosition for hierarchy joins.
 Static identities use the existing stable IDs. Time series link `subjectId` to
-`positionId`, map `capturedAt` to `Timestamp`, and retain `eventId`, occupancy,
+`positionId`, explicitly declare `Timestamp` as a DateTime time-series property,
+map `capturedAt` to it, and retain `eventId`, occupancy,
 confidence, observation type, and last-observed timestamp. Unobserved occupancy
 is omitted, not initialized to false.
 
@@ -247,6 +250,48 @@ If creation times out or the connection fails before an item ID is recorded, the
 service may still finish. Inspect Fabric before retrying; a name collision then
 stops automatic duplicate creation. Diagnose partial resources or remove the
 failed item manually before resuming. Do not discard state to bypass a collision.
+
+### Import Failure Diagnostics
+
+For a failed import, capture the service response on an explicitly requested
+attempt. Keep the existing checkpoint and use the same deployment arguments:
+
+```bash
+uv run infra/fabric/deploy.py apply --workspace "<workspace-id>" --tls12 \
+   --diagnostics-dir data/fabric/diagnostics
+```
+
+This is an `apply`, not a read-only diagnostic command. It can create any remaining
+items if the import succeeds. Check the workspace for partially created items
+before retrying. Do not repeatedly retry an unchanged definition when the service
+reports `isRetriable: false`.
+
+The optional directory receives uniquely named, owner-only files (mode `0600` on
+Linux) for failed Fabric HTTP requests and asynchronous operations. Files retain
+the service response, including nested error details, but exclude request bodies
+and authentication headers. Service messages can contain sensitive information;
+review locally before sharing and keep diagnostics out of source control. Normal
+terminal output remains sanitized. This option does not change the deployment
+fingerprint or capture KQL and OneLake SDK failures.
+
+`ALMOperationImportFailed` alone does not identify a malformed field. For example,
+the service may report only that importing a `MappingOperation` failed. Preserve
+the operation ID and diagnostic for further isolation or Fabric support rather
+than deleting completed resources or changing preview enums without evidence.
+
+The time-series import previously failed because its mapping referenced
+`Timestamp` without declaring that property in the entity definition. Staged live
+tests isolated the failure to that mapping; explicitly declaring the DateTime
+property allowed it to import. The complete 12-part definition was read back and
+verified before the existing checkpoint was reconciled and the remaining three
+flow definitions were created. No event data was inserted and no mapping jobs ran.
+
+Fabric normalizes entity property IDs and adds inherited properties during import.
+Diagnostic updates must preserve the returned entity definitions; resubmitting
+the original generated property IDs caused an `EntityType` import failure during
+isolation. The bootstrap does not update definitions of already recorded items.
+Changing rendered definitions changes the fingerprint. Do not bypass that check:
+reconcile only verified, code-created resources after proving which inputs changed.
 
 For a new model version, manually clean up the previous deployment and archive
 its state, or use a separate prefix with a separate `--state` file. Remove twin

@@ -305,7 +305,8 @@ uv run --directory apps/detect --extra fabric python -m tiger_perception.fabric 
 ```
 
 Replace `--dry-run` with `--live-fabric` only after configuring a destination
-privately in the process environment. The relay does not load `apps/.env`.
+privately in the process 
+environment. The relay does not load `apps/.env`.
 
 | Environment variable | Purpose |
 | --- | --- |
