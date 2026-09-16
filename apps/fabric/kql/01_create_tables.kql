@@ -1,0 +1,115 @@
+// ==============================================================================
+// Microsoft Fabric Eventhouse / KQL Database - Schema Definitions
+// Workload: Factory Edge Perception to Digital Twin POC
+// ==============================================================================
+
+// Execute each numbered block separately, in order, in the same KQL database.
+// In the Fabric queryset, highlight the complete block and select Run.
+// Do not assume Run executes this entire file; it can run only the current block.
+// Wait for success after each command. Stop and resolve errors before continuing.
+// Keep all quoted mapping lines together, and each ingest command with its CSV rows.
+// Seed commands append data: run each seed once, only after table verification.
+
+// 1. Create the raw streaming table (ingested directly from Fabric Eventstream).
+.create table ProcessEventsRaw (
+    schemaVersion: string,
+    eventId: string,
+    eventType: string,
+    sourceId: string,
+    subjectId: string,
+    observationType: string,
+    value: dynamic,
+    unit: string,
+    confidence: real,
+    capturedAt: datetime,
+    producedAt: datetime,
+    publishedAt: datetime,
+    provider: string,
+    model: string,
+    source: string,
+    observation: dynamic,
+    plantId: string,
+    plantName: string
+)
+
+// 2. Create the JSON ingestion mapping. Select through the closing ']' line.
+.create table ProcessEventsRaw ingestion json mapping "ProcessEventsRaw_JSON_Mapping"
+'['
+'    {"column": "schemaVersion", "Properties": {"Path": "$.schemaVersion"}},'
+'    {"column": "eventId", "Properties": {"Path": "$.eventId"}},'
+'    {"column": "eventType", "Properties": {"Path": "$.eventType"}},'
+'    {"column": "sourceId", "Properties": {"Path": "$.sourceId"}},'
+'    {"column": "subjectId", "Properties": {"Path": "$.subjectId"}},'
+'    {"column": "observationType", "Properties": {"Path": "$.observationType"}},'
+'    {"column": "value", "Properties": {"Path": "$.value"}},'
+'    {"column": "unit", "Properties": {"Path": "$.unit"}},'
+'    {"column": "confidence", "Properties": {"Path": "$.confidence"}},'
+'    {"column": "capturedAt", "Properties": {"Path": "$.capturedAt"}},'
+'    {"column": "producedAt", "Properties": {"Path": "$.producedAt"}},'
+'    {"column": "publishedAt", "Properties": {"Path": "$.publishedAt"}},'
+'    {"column": "provider", "Properties": {"Path": "$.provider"}},'
+'    {"column": "model", "Properties": {"Path": "$.model"}},'
+'    {"column": "source", "Properties": {"Path": "$.source"}},'
+'    {"column": "observation", "Properties": {"Path": "$.observation"}},'
+'    {"column": "plantId", "Properties": {"Path": "$.plantId"}},'
+'    {"column": "plantName", "Properties": {"Path": "$.plantName"}}'
+']'
+
+// 3. Enable ingestion timestamps.
+.alter table ProcessEventsRaw policy ingestiontime true
+
+// 4. Create Plants (hierarchy: Plant -> Cell -> MonitoredPosition).
+.create table Plants (
+    plantId: string,
+    plantName: string,
+    location: string,
+    createdTimestamp: datetime
+)
+
+// 5. Create Cells.
+.create table Cells (
+    cellId: string,
+    plantId: string,
+    cellName: string,
+    lineType: string
+)
+
+// 6. Create MonitoredPositions before attempting its seed command.
+.create table MonitoredPositions (
+    positionId: string,
+    cellId: string,
+    positionName: string,
+    monitoredSourceId: string
+)
+
+// 7. Verify ProcessEventsRaw, Plants, Cells and MonitoredPositions are listed.
+// If any are missing, run their create blocks in this database before continuing.
+.show tables
+
+// 8. Seed Plants once. Reruns append duplicate rows.
+.ingest inline into table Plants <|
+demo-plant-01,Demo Plant,"Seattle, WA",2026-09-15T00:00:00Z
+
+// 9. Seed Cells once. Select this command and both data rows together.
+.ingest inline into table Cells <|
+cell-a,demo-plant-01,Assembly Cell Alpha,Robotic Assembly
+cell-b,demo-plant-01,Packaging Cell Beta,Automated Packaging
+
+// 10. Seed MonitoredPositions once. Select this command and all four data rows.
+.ingest inline into table MonitoredPositions <|
+cell-a-object-position-01,cell-a,Object Station A1,cell-a-camera-01
+cell-a-pallet-position-01,cell-a,Pallet Station A1,cell-a-camera-01
+cell-b-object-position-01,cell-b,Object Station B1,cell-b-camera-01
+cell-b-pallet-position-01,cell-b,Pallet Station B1,cell-b-camera-01
+
+// 11. Verify Plants: expected Count = 1 in a fresh database seeded once.
+Plants
+| count
+
+// 12. Verify Cells: expected Count = 2 in a fresh database seeded once.
+Cells
+| count
+
+// 13. Verify MonitoredPositions: expected Count = 4 in a fresh database seeded once.
+MonitoredPositions
+| count

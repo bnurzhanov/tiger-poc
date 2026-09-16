@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 import rtsp_yolo
 from tiger_perception.sinks import LocalJsonlSink, SinkError, SinkUnavailableError
 
@@ -60,6 +61,17 @@ def test_invalid_event_fails_before_publication(sink_path: Path) -> None:
 
     assert sink_path.exists() is False or sink_path.read_text(encoding="utf-8") == ""
     assert sink.failed_count == 1
+
+
+def test_given_non_json_extension_when_published_then_local_sink_rejects(sink_path: Path) -> None:
+    event = {**valid_event(), "observation": {"labels": {"person"}}}
+    sink = LocalJsonlSink(path=sink_path)
+
+    with pytest.raises(SinkError, match="JSON-serializable"):
+        sink.publish(event)
+
+    assert sink.failed_count == 1
+    assert not sink_path.exists()
 
 
 def test_sink_outage_and_recovery_are_bounded_and_deterministic(sink_path: Path) -> None:

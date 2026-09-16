@@ -210,6 +210,87 @@ For manual video replay, set `source.type: replay` and resolve `uriFrom` to a pr
 local clip path. Replay is paced at the video FPS and uses the same real inference
 adapter. Neither replay nor fixtures replace physical camera validation.
 
+## Fabric Publishing And Edge Migration
+
+This project owns the supported Python implementation and the `tiger_perception`
+package. Use its canonical contracts, time-based presence policy and manifest
+runner. The existing manifest runner and local JSONL destination are unchanged.
+
+The [Fabric relay](tiger_perception/fabric.py) preserves remote publishing, optional
+local audit traces and the six-transition multi-cell demo. It imports the same
+`ProcessEvent`, validator and JSONL sink as detection. Cloud SDKs are optional and
+loaded only for live publication. Install the optional dependencies from the root:
+
+```bash
+uv sync --project apps/detect --extra fabric
+```
+
+Run the offline demo; its cell A object and cell B pallet identities match the
+shipped manifests. Synthetic empty confidence is 0.0, as in the presence rule.
+The scenario spans 28 seconds of event time and is not a latency measurement.
+
+```bash
+uv run --directory apps/detect --extra fabric python -m tiger_perception.fabric \
+  --demo --dry-run --output ../../data/fabric-demo.jsonl
+```
+
+Validate completed camera event files without modifying them:
+
+```bash
+uv run --directory apps/detect --extra fabric python -m tiger_perception.fabric \
+  --input ../../data/cell-a/events.jsonl ../../data/cell-b/events.jsonl \
+  --dry-run --output ../../data/fabric-audit.jsonl
+```
+
+Replace `--dry-run` with `--live-fabric` only after configuring a destination
+privately in the process environment. The relay does not load `apps/.env`.
+
+| Environment variable | Purpose |
+| --- | --- |
+| `FABRIC_EVENTSTREAM_NAMESPACE` | Event Hubs namespace hostname for `DefaultAzureCredential`, preferred for Azure Event Hubs |
+| `FABRIC_EVENTSTREAM_EVENTHUB_NAME` | Required with namespace authentication; optional with an entity-scoped connection string |
+| `AZURE_CLIENT_ID` | On an Azure host, selects the attached user-assigned managed identity using the `managedIdentityClientId` deployment output |
+| `FABRIC_EVENTSTREAM_CONNECTION_STRING` | Fabric Custom App source connection string, or existing Event Hubs sender credentials |
+| `MOCK_FABRIC` | `1`, `true`, or `yes` forces offline mode even with live arguments |
+
+Namespace authentication takes precedence over connection strings.
+Grant the publishing identity **Azure Event Hubs Data Sender** on the target hub.
+The [infrastructure template](../../infra/digital-twin-poc/README.md) grants this
+role to its provisioned user-assigned identity. Attach that identity to your Azure
+compute host using `managedIdentityResourceId`, and set `AZURE_CLIENT_ID` to
+`managedIdentityClientId` in the relay's process environment. Set the namespace
+hostname and hub name from `eventHubNamespaceHostname` and `eventHubName` too.
+The template does not deploy a compute host or attach the identity to one.
+
+`DefaultAzureCredential` already reads `AZURE_CLIENT_ID` for its managed-identity
+candidate; this setting does not force the entire credential chain to use it.
+For local WSL or laptop execution, sign in with an available developer credential
+and grant that developer identity the sender role separately. Setting the managed
+identity's client ID does not make it available locally. The relay does not assign
+roles or deploy resources. No configured destination in live mode is an error,
+not a dry run. See the
+[Azure Identity reference](https://learn.microsoft.com/en-us/python/api/azure-identity/azure.identity.defaultazurecredential).
+
+The input mode reads completed JSONL files once; it does not tail active files,
+checkpoint delivery or retry the entire file automatically. The original event
+IDs, timestamps and observation evidence are retained, with canonical secret
+redaction. Local traces are audit copies, not remote delivery acknowledgments.
+Rerunning a file can resend events; deduplicate by `eventId` downstream. Azure SDK
+transport retries remain enabled; publication failures stop the relay. A trace must
+never share a path with an input or an active detector output. `--iterations`
+repeats only the demo, and `--interval` controls wall-clock pacing independently
+of event time.
+
+Run publisher and artifact checks with the optional dependencies installed:
+
+```bash
+uv run --project apps/detect --extra fabric pytest apps/detect/tests/test_fabric.py apps/detect/tests/test_fabric_contracts.py -q
+```
+
+Configure ingestion and reference identities using the
+[Fabric setup](../fabric/README.md). SDK reference:
+[Event Hubs Python client](https://learn.microsoft.com/python/api/overview/azure/eventhub-readme).
+
 ## Troubleshooting
 
 * Missing camera reference: set the named variable privately in the environment file
