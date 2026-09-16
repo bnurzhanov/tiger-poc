@@ -77,10 +77,26 @@ for the current portal workflow.
 Use a new KQL database for this revised setup. Execute individual management
 commands in order, before sending events:
 
-1. Run [01_create_tables.kql](kql/01_create_tables.kql) to create raw/reference tables,
-     JSON mapping and the ingestion-time policy. Run the reference seeds once.
-2. Run [02_update_policy.kql](kql/02_update_policy.kql) to create the typed presence
+> [!IMPORTANT]
+> These files contain separate commands, not a single query to run as a batch.
+> In the default or standalone Fabric queryset, highlight one complete command
+> block and select **Run**. Run can execute only the current block; pasting a file
+> into the editor does not mean all its commands have executed. Wait for success
+> after every command and stop on errors. Keep the same database selected.
+
+1. Execute the numbered blocks in [01_create_tables.kql](kql/01_create_tables.kql)
+    individually, from top to bottom. Blocks 1-6 create raw/reference tables,
+    JSON mapping and the ingestion-time policy. Select all quoted mapping lines
+    together as part of block 2. At block 7, confirm `.show tables` lists
+    `ProcessEventsRaw`, `Plants`, `Cells` and `MonitoredPositions` before seeding.
+    Run seed blocks 8-10 once each, selecting the command and all its CSV rows
+    together. Run count queries 11-13 separately; in a fresh database seeded once,
+    expect 1 plant, 2 cells and 4 monitored positions.
+2. Execute each command in [02_update_policy.kql](kql/02_update_policy.kql)
+    separately, in order, to create the typed presence
      table, transactional update policy and aggregation-only materialized view.
+    Select each function or view definition with its complete brace-delimited
+    body, and the update-policy command with its JSON string.
      Wait for the returned `.create async materialized-view` operation to complete
      before continuing to twin bindings and query validation; until it finishes,
      `CurrentPositionOccupancy` can be unavailable even though the command returned.
@@ -106,6 +122,37 @@ data is not backfilled by the new update policy. If needed, run
 creating the policy, avoiding overlapping live ingestion; deduplicate replayed
 event IDs. The materialized view backfills from `ConfirmedPresenceEvents`, not raw
 history. Update dashboard bindings to the new table and view names.
+
+### Recover From A Missing Table During Setup
+
+`BadRequest_TableNotExist` for `MonitoredPositions` while running the seed command
+means the table did not exist in the executing database at that time. A likely
+cause is running only the final `.ingest inline` block without first executing
+the `.create table` block. The error alone does not establish an Eventstream
+configuration problem or a database mismatch.
+
+1. In the queryset, confirm the selected database matches the database named in
+    the error, then run `.show tables` as a separate command.
+2. If `MonitoredPositions` is missing, highlight and execute its complete
+    `.create table MonitoredPositions (...)` block (block 6). Wait for success.
+    If creation fails, resolve that error before attempting ingestion again.
+3. Run this command separately to confirm the schema exists:
+
+    ```kusto
+    .show table MonitoredPositions schema as json
+    ```
+
+4. Run the corresponding count query before seeding. If the table is empty and
+    the earlier seed failed, execute its seed block once, then verify the count.
+    If rows already exist, inspect them before deciding whether data is missing.
+5. Resume any remaining setup blocks individually, verifying each result.
+
+> [!WARNING]
+> `.ingest inline` appends rows. Do not rerun successful seeds or the entire setup
+> blindly during recovery; duplicate reference rows can multiply joined results.
+
+See [Microsoft Learn's KQL queryset guide](https://learn.microsoft.com/en-us/fabric/real-time-intelligence/kusto-query-set)
+for data-source selection and query execution in the Fabric portal.
 
 ### Configure Twin And Dashboard Views
 
