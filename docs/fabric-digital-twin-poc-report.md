@@ -32,7 +32,7 @@ refresh settings do not guarantee sub-second or five-second end-to-end updates.
 ### 1.1 Ingestion & Transport Connectivity
 * **Standardization:** Process observations adhere to the versioned `process-event-v1.json` schema, encapsulating `eventId`, `sourceId`, `subjectId`, `observationType: PalletPresent`, boolean `value`, `confidence`, timestamps, and plant/cell metadata.
 * **Hybrid Connectivity Pattern:** Edge nodes communicate with Fabric through a dual-mode `FabricEventstreamSink`:
-  1. **Production Mode:** AMQP / HTTPS directly to Fabric Eventstream (via Azure Event Hubs endpoint or Eventstream REST URL).
+  1. **Production Mode:** Event Hubs protocol through a Fabric Custom App source connection string or an Azure Event Hubs namespace.
   2. **Dry-Run / Local Mode:** Validates schema, logs structured output to console, and mirrors events to local JSON Lines (`.jsonl`) files when cloud credentials are not present.
 
 ### 1.2 Fabric Eventhouse & Digital Twin Model

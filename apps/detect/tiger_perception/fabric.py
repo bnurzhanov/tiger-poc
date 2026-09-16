@@ -39,22 +39,18 @@ class FabricEventstreamSink:
         connection_string: str | None = None,
         eventhub_name: str | None = None,
         namespace: str | None = None,
-        rest_endpoint: str | None = None,
         dry_run: bool = False,
         fallback_jsonl_path: str | Path | None = None,
     ) -> None:
         self.connection_string = connection_string or os.getenv("FABRIC_EVENTSTREAM_CONNECTION_STRING")
         self.eventhub_name = eventhub_name or os.getenv("FABRIC_EVENTSTREAM_EVENTHUB_NAME")
         self.namespace = namespace or os.getenv("FABRIC_EVENTSTREAM_NAMESPACE")
-        self.rest_endpoint = rest_endpoint or os.getenv("FABRIC_EVENTSTREAM_REST_ENDPOINT")
         self.dry_run = dry_run or os.getenv("MOCK_FABRIC", "").lower() in {"1", "true", "yes"}
         if not self.dry_run:
-            if not (self.namespace or self.connection_string or self.rest_endpoint):
-                raise SinkError("Live publishing requires a Fabric destination; use --dry-run offline.")
+            if not (self.namespace or self.connection_string):
+                raise SinkError("Live publishing requires an Event Hubs destination; use --dry-run offline.")
             if self.namespace and not self.eventhub_name:
                 raise SinkError("Namespace authentication requires FABRIC_EVENTSTREAM_EVENTHUB_NAME.")
-            if self.rest_endpoint and not self.rest_endpoint.startswith("https://"):
-                raise SinkError("The REST destination must use HTTPS.")
         self.fallback_jsonl = (
             LocalJsonlSink(path=fallback_jsonl_path) if fallback_jsonl_path is not None else None
         )
@@ -91,32 +87,18 @@ class FabricEventstreamSink:
             return True
 
         try:
-            import requests
             from azure.core.exceptions import AzureError
         except ImportError:
             raise SinkUnavailableError("Install the detect project's 'fabric' extra for live publishing.") from None
 
         try:
-            if self.namespace or self.connection_string:
-                from azure.eventhub import EventData
+            from azure.eventhub import EventData
 
-                producer = self._get_eventhub_producer()
-                batch = producer.create_batch(partition_key=validated["subjectId"])
-                batch.add(EventData(json.dumps(validated)))
-                producer.send_batch(batch)
-            else:
-                if self.rest_endpoint is None:
-                    raise SinkError("No REST destination configured.")
-                response = requests.post(
-                    self.rest_endpoint,
-                    json=validated,
-                    timeout=5.0,
-                    allow_redirects=False,
-                )
-                response.raise_for_status()
-                if not 200 <= response.status_code < 300:
-                    raise SinkUnavailableError("REST destination did not accept the event.")
-        except (AzureError, requests.RequestException, OSError, ValueError):
+            producer = self._get_eventhub_producer()
+            batch = producer.create_batch(partition_key=validated["subjectId"])
+            batch.add(EventData(json.dumps(validated)))
+            producer.send_batch(batch)
+        except (AzureError, OSError, ValueError):
             raise SinkUnavailableError(
                 "Fabric publication failed; verify destination, credentials, permissions and connectivity."
             ) from None

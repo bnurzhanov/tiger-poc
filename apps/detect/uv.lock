@@ -1865,7 +1865,6 @@ dependencies = [
 fabric = [
     { name = "azure-eventhub" },
     { name = "azure-identity" },
-    { name = "requests" },
 ]
 
 [package.metadata]
@@ -1880,7 +1879,6 @@ requires-dist = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "python-dotenv", specifier = ">=1,<2" },
     { name = "pyyaml", specifier = ">=6,<7" },
-    { name = "requests", marker = "extra == 'fabric'", specifier = ">=2.32,<3" },
     { name = "ruff", specifier = ">=0.16.7" },
     { name = "tqdm", specifier = ">=4.70.1" },
     { name = "ultralytics", specifier = ">=8.3,<9" },

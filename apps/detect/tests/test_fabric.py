@@ -19,7 +19,7 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep tests independent of real Fabric credentials and mock flags."""
     for name in (
         "FABRIC_EVENTSTREAM_CONNECTION_STRING", "FABRIC_EVENTSTREAM_EVENTHUB_NAME",
-        "FABRIC_EVENTSTREAM_NAMESPACE", "FABRIC_EVENTSTREAM_REST_ENDPOINT", "MOCK_FABRIC",
+        "FABRIC_EVENTSTREAM_NAMESPACE", "MOCK_FABRIC",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -62,7 +62,7 @@ def test_given_invalid_presence_when_published_then_detect_rejects(value: Any, u
 
 def test_given_missing_destination_when_live_then_fail_closed() -> None:
     """Live publication cannot silently become a dry run."""
-    with pytest.raises(SinkError, match="requires a Fabric destination"):
+    with pytest.raises(SinkError, match="requires an Event Hubs destination"):
         relay.FabricEventstreamSink()
 
 
@@ -112,21 +112,24 @@ def test_given_eventhub_when_publishing_twice_then_reuse_open_producer(
 
 
 def test_given_remote_failure_when_retried_then_trace_dedup_does_not_skip_send(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """A local audit record does not prove that remote delivery succeeded."""
-    attempts: list[dict[str, Any]] = []
+    attempts = 0
 
-    def fail_post(*args: Any, **kwargs: Any) -> None:
-        """Simulate a destination error containing secret material."""
-        attempts.append(kwargs)
-        raise OSError("sensitive-connection-string")
+    class FailingProducer:
+        """Simulate an Event Hubs failure containing secret material."""
 
-    requests = pytest.importorskip("requests")
-    monkeypatch.setattr(requests, "post", fail_post)
+        def create_batch(self, *, partition_key: str) -> None:
+            """Fail before creating a batch and count every delivery attempt."""
+            nonlocal attempts
+            attempts += 1
+            raise OSError("sensitive-connection-string")
+
     sink = relay.FabricEventstreamSink(
-        rest_endpoint="https://example.invalid/events", fallback_jsonl_path=tmp_path / "trace.jsonl"
+        connection_string="test-only", fallback_jsonl_path=tmp_path / "trace.jsonl"
     )
+    sink._producer_client = FailingProducer()
     event = relay.generate_scenario_events()[0]
 
     for _attempt in range(2):
@@ -134,7 +137,7 @@ def test_given_remote_failure_when_retried_then_trace_dedup_does_not_skip_send(
             sink.publish(event)
         assert "sensitive-connection-string" not in str(error.value)
 
-    assert len(attempts) == 2
+    assert attempts == 2
     assert len((tmp_path / "trace.jsonl").read_text().splitlines()) == 1
 
 
@@ -161,33 +164,3 @@ def test_given_input_as_output_when_relayed_then_refuse_to_modify(tmp_path: Path
         relay.main(["--input", str(source), "--output", str(source)])
 
     assert source.read_text() == "unchanged\n"
-
-
-@pytest.mark.parametrize("status_code", [200, 202, 302, 500])
-def test_given_rest_response_when_published_then_only_success_is_accepted(
-    status_code: int, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Accept 2xx only, without following redirects or rewriting detector metadata."""
-    requests = pytest.importorskip("requests")
-    pytest.importorskip("azure.core")
-    event = relay.generate_scenario_events()[0]
-    event.update(plantId="demo-plant-01", plantName="Demo Plant")
-    calls: list[dict[str, Any]] = []
-
-    def post(url: str, **kwargs: Any) -> Any:
-        """Return an actual requests response without network access."""
-        calls.append(kwargs)
-        response = requests.Response()
-        response.status_code = status_code
-        return response
-
-    monkeypatch.setattr(requests, "post", post)
-    sink = relay.FabricEventstreamSink(rest_endpoint="https://example.invalid/events")
-
-    if status_code < 300:
-        assert sink.publish(event) is True
-    else:
-        with pytest.raises(SinkUnavailableError):
-            sink.publish(event)
-
-    assert calls == [{"json": event, "timeout": 5.0, "allow_redirects": False}]

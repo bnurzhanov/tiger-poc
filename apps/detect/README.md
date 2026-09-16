@@ -251,10 +251,9 @@ privately in the process environment. The relay does not load `apps/.env`.
 | `FABRIC_EVENTSTREAM_EVENTHUB_NAME` | Required with namespace authentication; optional with an entity-scoped connection string |
 | `AZURE_CLIENT_ID` | On an Azure host, selects the attached user-assigned managed identity using the `managedIdentityClientId` deployment output |
 | `FABRIC_EVENTSTREAM_CONNECTION_STRING` | Fabric Custom App source connection string, or existing Event Hubs sender credentials |
-| `FABRIC_EVENTSTREAM_REST_ENDPOINT` | Optional HTTPS ingestion endpoint accepting a single JSON object per POST; not the Fabric management API |
 | `MOCK_FABRIC` | `1`, `true`, or `yes` forces offline mode even with live arguments |
 
-Namespace authentication takes precedence over connection strings, then REST.
+Namespace authentication takes precedence over connection strings.
 Grant the publishing identity **Azure Event Hubs Data Sender** on the target hub.
 The [infrastructure template](../../infra/digital-twin-poc/README.md) grants this
 role to its provisioned user-assigned identity. Attach that identity to your Azure
@@ -277,9 +276,10 @@ checkpoint delivery or retry the entire file automatically. The original event
 IDs, timestamps and observation evidence are retained, with canonical secret
 redaction. Local traces are audit copies, not remote delivery acknowledgments.
 Rerunning a file can resend events; deduplicate by `eventId` downstream. Azure SDK
-transport retries remain enabled; REST failures stop the relay. A trace must never
-share a path with an input or an active detector output. `--iterations` repeats only
-the demo, and `--interval` controls wall-clock pacing independently of event time.
+transport retries remain enabled; publication failures stop the relay. A trace must
+never share a path with an input or an active detector output. `--iterations`
+repeats only the demo, and `--interval` controls wall-clock pacing independently
+of event time.
 
 Run publisher and artifact checks with the optional dependencies installed:
 
