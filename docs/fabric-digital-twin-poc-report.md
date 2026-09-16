@@ -114,8 +114,10 @@ tiger-poc/
 The original POC recorded nine passing tests for its former standalone prototype.
 That historical result is not a verification of the current implementation.
 The supported suite in [apps/detect/tests](../apps/detect/tests) covers contracts,
-presence rules, Fabric publishing and multi-cell replay. After consolidation,
-91 tests passed locally; live Fabric delivery and KQL execution remain unverified.
+presence rules, Fabric publishing and multi-cell replay. After the review fixes,
+96 tests passed locally, including root-manifest identity coverage, historical
+demo timestamps, relay error diagnostics and both publisher authentication paths.
+Live Fabric delivery and KQL execution remain unverified.
 
 ### 3.2 Bicep Compilation & IaC Linting
 Bicep templates compile cleanly to ARM JSON without warnings:

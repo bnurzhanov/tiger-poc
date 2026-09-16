@@ -16,7 +16,7 @@
       "cellName": "Assembly Cell Alpha",
       "lineType": "Robotic Assembly",
       "relationships": {
-        "monitorsPosition": ["cell-a-object-position-01"]
+        "monitorsPosition": ["cell-a-object-position-01", "cell-a-pallet-position-01"]
       }
     },
     {
@@ -34,6 +34,17 @@
       "positionId": "cell-a-object-position-01",
       "cellId": "cell-a",
       "positionName": "Object Station A1",
+      "monitoredSourceId": "cell-a-camera-01",
+      "initialState": {
+        "isOccupied": null,
+        "confidence": null,
+        "lastObservedTimestamp": null
+      }
+    },
+    {
+      "positionId": "cell-a-pallet-position-01",
+      "cellId": "cell-a",
+      "positionName": "Pallet Station A1",
       "monitoredSourceId": "cell-a-camera-01",
       "initialState": {
         "isOccupied": null,

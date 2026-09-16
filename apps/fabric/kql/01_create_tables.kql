@@ -82,5 +82,6 @@ cell-b,demo-plant-01,Packaging Cell Beta,Automated Packaging
 
 .ingest inline into table MonitoredPositions <|
 cell-a-object-position-01,cell-a,Object Station A1,cell-a-camera-01
+cell-a-pallet-position-01,cell-a,Pallet Station A1,cell-a-camera-01
 cell-b-object-position-01,cell-b,Object Station B1,cell-b-camera-01
 cell-b-pallet-position-01,cell-b,Pallet Station B1,cell-b-camera-01

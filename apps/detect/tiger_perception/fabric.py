@@ -124,8 +124,8 @@ class FabricEventstreamSink:
 
 
 def generate_scenario_events(start_time: datetime | None = None) -> list[dict[str, Any]]:
-    """Preserve edge's six-transition demo using detect's object and pallet identities."""
-    base_time = start_time or datetime.now(UTC)
+    """Generate six transitions ending now unless an explicit start is provided."""
+    base_time = start_time if start_time is not None else datetime.now(UTC) - timedelta(seconds=28)
     run_id = uuid4().hex
     transitions = [
         (0, "a", False), (0, "b", False), (5, "a", True),
@@ -204,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=not args.live_fabric, fallback_jsonl_path=args.output
         )
         published = 0
-        demo_start = datetime.now(UTC)
+        demo_start = datetime.now(UTC) - timedelta(seconds=29 * args.iterations - 1)
         for iteration in range(args.iterations):
             events = (
                 generate_scenario_events(demo_start + timedelta(seconds=29 * iteration))
@@ -218,7 +218,10 @@ def main(argv: list[str] | None = None) -> int:
                     time.sleep(args.interval)
         logger.info("%s %d events", "Validated" if sink.dry_run else "Published", published)
         return 0
-    except (SinkError, OSError):
+    except SinkError as error:
+        logger.error("Relay failed: %s", error)
+        return 1
+    except OSError:
         logger.error("Relay failed; verify input data, file access and Fabric configuration.")
         return 1
     except KeyboardInterrupt:
