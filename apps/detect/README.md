@@ -107,13 +107,32 @@ LAN address; `localhost` inside the container refers to the container itself.
 From the repository root, start the local camera and viewer:
 
 ```bash
+export LOCAL_UID="$(id -u)"
+export LOCAL_GID="$(id -g)"
 mkdir -p data
 docker compose --env-file apps/.env -f apps/docker-compose.yml up --build -d
 ```
 
+Run these commands as your normal host user, not with `sudo`. Compose requires
+`LOCAL_UID` and `LOCAL_GID` for both the image build and container runtime. Export
+them in each new shell before using Compose, or set their numeric values in
+`apps/.env`. Compose does not evaluate `$(id -u)` or `$(id -g)` in that file.
+Missing host data directories are rejected instead of being created by Docker
+as root. The detector creates its output subdirectories as your configured user.
+
+If an earlier run already created a root-owned `data` directory, an administrator
+must repair its ownership once. From the repository root:
+
+```bash
+sudo chown "$(id -u):$(id -g)" data
+```
+
+Existing output subdirectories and files must also be writable by that user;
+changing the Compose user does not change existing file ownership.
+
 Open <http://127.0.0.1:8765>. Set `VIEWER_PORT` in the environment file if that port
-is occupied. The image runs as UID/GID 1000; the host data directory and secret
-file must be accessible to that identity. Do not make credentials world-readable.
+is occupied. The host data directory and secret file must be accessible to the
+configured UID/GID. Do not make credentials world-readable.
 The viewer binds to all container interfaces but publishes its host port only on
 loopback. It has no authentication and must not be exposed to the LAN or internet.
 The detector alone receives camera credentials. The viewer and publisher mount
@@ -147,7 +166,11 @@ docker compose --env-file apps/.env -f apps/docker-compose.yml --profile fabric 
 The publisher's delivery checkpoint lives in the `publisher-state` named volume
 at `/var/lib/tiger-publisher/delivery.json`, separate from Fabric provisioning
 checkpoints. Ordinary `down` retains it; do not use `down -v` during normal
-restarts. The detector's event, status, and preview files stay in the host `data`
+restarts. A new volume inherits the configured UID/GID from the rebuilt image.
+If you change UID/GID with an existing volume, stop the publisher and have an
+administrator update that volume's ownership while preserving its checkpoint.
+Rebuilding does not change existing volume ownership.
+The detector's event, status, and preview files stay in the host `data`
 directory. Keep event files append-only. Do not rotate, truncate, or replace a
 followed file without stopping the publisher and reconciling its delivery state.
 This version does not automatically compact acknowledged files; monitor disk space.

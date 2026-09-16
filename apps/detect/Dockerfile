@@ -28,9 +28,12 @@ COPY tiger_perception ./tiger_perception
 COPY manifests ./manifests
 COPY rtsp_yolo.py yolo26n.pt ./
 
-RUN mkdir -p /workspace/data /var/lib/tiger-publisher \
-    && chown 1000:1000 /workspace/data /var/lib/tiger-publisher
+ARG LOCAL_UID=1000
+ARG LOCAL_GID=1000
 
-USER 1000:1000
+RUN mkdir -p /workspace/data /var/lib/tiger-publisher \
+    && chown "${LOCAL_UID}:${LOCAL_GID}" /workspace/data /var/lib/tiger-publisher
+
+USER ${LOCAL_UID}:${LOCAL_GID}
 
 CMD ["uv", "run", "--no-sync", "python", "rtsp_yolo.py", "--manifest", "manifests/cell-a-jeep.yaml"]

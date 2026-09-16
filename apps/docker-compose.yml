@@ -2,6 +2,10 @@ x-runtime: &runtime
   image: tiger-perception:local
   build:
     context: ./detect
+    args:
+      LOCAL_UID: ${LOCAL_UID:?Set LOCAL_UID to your host user ID (id -u)}
+      LOCAL_GID: ${LOCAL_GID:?Set LOCAL_GID to your host group ID (id -g)}
+  user: "${LOCAL_UID:?Set LOCAL_UID to your host user ID (id -u)}:${LOCAL_GID:?Set LOCAL_GID to your host group ID (id -g)}"
   init: true
   restart: unless-stopped
 
@@ -11,7 +15,11 @@ services:
     environment:
       CAMERA_A_RTSP_URL: ${CAMERA_A_RTSP_URL:?Set CAMERA_A_RTSP_URL in apps/.env}
     volumes:
-      - ../data:/workspace/data
+      - type: bind
+        source: ../data
+        target: /workspace/data
+        bind:
+          create_host_path: false
 
   viewer:
     <<: *runtime
@@ -31,7 +39,12 @@ services:
     ports:
       - "127.0.0.1:${VIEWER_PORT:-8765}:8765"
     volumes:
-      - ../data:/workspace/data:ro
+      - type: bind
+        source: ../data
+        target: /workspace/data
+        read_only: true
+        bind:
+          create_host_path: false
     healthcheck:
       test: ["CMD", "uv", "run", "--no-sync", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/cells', timeout=3).close()"]
       interval: 15s
@@ -59,7 +72,12 @@ services:
     secrets:
       - fabric_connection_string
     volumes:
-      - ../data:/workspace/data:ro
+      - type: bind
+        source: ../data
+        target: /workspace/data
+        read_only: true
+        bind:
+          create_host_path: false
       - publisher-state:/var/lib/tiger-publisher
 
 secrets:
