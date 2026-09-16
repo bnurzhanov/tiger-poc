@@ -1,43 +1,12 @@
 {
   "branch": "feature/fabric-digital-twin-poc",
   "base": "main",
-  "verdict": "💬 Approve with comments",
+  "verdict": "✅ Resolved",
   "severity_counts": {
     "critical": 0,
     "high": 0,
-    "medium": 3,
+    "medium": 0,
     "low": 0
   },
-  "findings": [
-    {
-      "id": "STD-001",
-      "severity": "medium",
-      "title": "Bicep files omit required metadata headers",
-      "file": "infra/digital-twin-poc/main.bicep",
-      "line": 1,
-      "skill": "bicep",
-      "rule": "Every Bicep file includes metadata at the top.",
-      "detail": "The project Bicep guidance requires each file to start with `metadata name` and `metadata description` blocks and to follow a documented section order. The changed deployment files begin with comments only and do not declare the required metadata, which weakens maintainability and consistency for IaC assets."
-    },
-    {
-      "id": "STD-002",
-      "severity": "medium",
-      "title": "Shared parameter types are bypassed in the Event Hubs module",
-      "file": "infra/digital-twin-poc/modules/eventhub.bicep",
-      "line": 22,
-      "skill": "bicep",
-      "rule": "Define related parameter types in types.bicep and reuse them.",
-      "detail": "The Bicep conventions specify that related parameter types belong in `types.bicep` and that shared configuration should be exported and reused instead of using loose `object` types. This module declares `param tags object`, even though the repository defines `ResourceTags` in `infra/digital-twin-poc/types.bicep` and the parent module already passes a typed value. This reduces validation and consistency."
-    },
-    {
-      "id": "STD-003",
-      "severity": "medium",
-      "title": "Shared parameter types are bypassed in the identity module",
-      "file": "infra/digital-twin-poc/modules/identity.bicep",
-      "line": 11,
-      "skill": "bicep",
-      "rule": "Define related parameter types in types.bicep and reuse them.",
-      "detail": "The identity module also accepts `param tags object` rather than the shared `ResourceTags` type. This misses the project guidance for centralized type definitions, a shared naming contract, and stronger compile-time validation across the deployment stack."
-    }
-  ]
+  "findings": []
 }

@@ -197,6 +197,7 @@ def main(argv: list[str] | None = None) -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     sink = None
+    exit_code = 0
     try:
         sink = FabricEventstreamSink(
             dry_run=not args.live_fabric, fallback_jsonl_path=args.output
@@ -209,27 +210,28 @@ def main(argv: list[str] | None = None) -> int:
                 if args.demo
                 else read_events(args.input)
             )
-            for index, event in enumerate(events):
+            for event in events:
+                if args.interval and published:
+                    time.sleep(args.interval)
                 sink.publish(event)
                 published += 1
-                if args.interval and index < len(events) - 1:
-                    time.sleep(args.interval)
         logger.info("%s %d events", "Validated" if sink.dry_run else "Published", published)
-        return 0
     except SinkError as error:
         logger.error("Relay failed: %s", error)
-        return 1
+        exit_code = 1
     except OSError:
         logger.error("Relay failed; verify input data, file access and Fabric configuration.")
-        return 1
+        exit_code = 1
     except KeyboardInterrupt:
-        return 130
+        exit_code = 130
     finally:
         if sink is not None:
             try:
                 sink.close()
             except (SinkError, OSError):
                 logger.error("Fabric client cleanup failed.")
+                exit_code = 1
+    return exit_code
 
 
 if __name__ == "__main__":

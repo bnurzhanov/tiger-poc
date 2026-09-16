@@ -137,6 +137,58 @@ def test_given_publish_interval_when_relayed_then_skip_sleep_after_last_event(
     assert sleep_calls == [0.5, 0.5, 0.5, 0.5, 0.5]
 
 
+def test_given_input_file_when_relayed_with_interval_then_sleep_between_each_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Delay every publication after the first even when the input iterator is lazy."""
+    sleep_calls: list[float] = []
+    published: list[dict[str, Any]] = []
+    source = tmp_path / "events.jsonl"
+    source.write_text("\n".join(json.dumps(event) for event in relay.generate_scenario_events()) + "\n")
+
+    class StubSink:
+        dry_run = True
+
+        def publish(self, event: dict[str, Any]) -> None:
+            """Capture the event stream without network effects."""
+            published.append(event)
+
+        def close(self) -> None:
+            """No-op cleanup for the relay test."""
+
+    monkeypatch.setattr(relay, "FabricEventstreamSink", lambda **kwargs: StubSink())
+    monkeypatch.setattr(relay.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    result = relay.main(["--input", str(source), "--interval", "0.25"])
+
+    assert result == 0
+    assert len(published) == 6
+    assert sleep_calls == [0.25, 0.25, 0.25, 0.25, 0.25]
+    assert "Relay failed" not in caplog.text
+
+
+def test_given_cleanup_failure_when_relayed_then_exit_nonzero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Cleanup errors should be surfaced as a failed relay exit status."""
+    class BrokenSink:
+        dry_run = True
+
+        def publish(self, event: dict[str, Any]) -> None:
+            """Dummy publisher for the failing close path."""
+
+        def close(self) -> None:
+            """Fail cleanup to validate the relay exit status."""
+            raise SinkUnavailableError("Fabric client cleanup failed.")
+
+    monkeypatch.setattr(relay, "FabricEventstreamSink", lambda **kwargs: BrokenSink())
+
+    result = relay.main(["--demo", "--output", str(tmp_path / "demo.jsonl")])
+
+    assert result == 1
+    assert "Fabric client cleanup failed." in caplog.text
+
+
 def test_given_invalid_jsonl_when_relayed_then_report_line_without_input_contents(
     tmp_path: Path, caplog: pytest.LogCaptureFixture,
 ) -> None:
