@@ -48,6 +48,30 @@ Fabric Eventstream (Custom App source / Event Hubs)
 
 ## Setup
 
+### Create The Eventhouse
+
+You need a Fabric workspace assigned to a
+[Fabric-enabled capacity](https://learn.microsoft.com/en-us/fabric/enterprise/licenses#capacity).
+Create the Eventhouse and its first KQL database in the Fabric portal:
+
+1. Open the [Microsoft Fabric portal](https://app.fabric.microsoft.com), switch to
+    the Fabric experience if needed, and select the target workspace.
+2. Select **New item**, search for **Eventhouse**, and select **Eventhouse**.
+3. Enter a name such as `tiger-poc-eventhouse`, and select **Create**. Names can
+    contain letters, numbers, underscores, periods, and hyphens. Fabric creates the
+    Eventhouse and a default child KQL database with the same name.
+4. Use the default database for this POC, or create a separate database by selecting
+    **+** under **KQL Databases**, entering a name such as `tiger-poc`, selecting
+    **New database**, and then selecting **Create**.
+5. Select the database and open its automatically created embedded KQL queryset.
+    Use this query environment to run the setup scripts in the next section.
+
+An Eventhouse can contain multiple KQL databases that share its capacity and
+resources. See the Microsoft Learn instructions for
+[creating an Eventhouse](https://learn.microsoft.com/en-us/fabric/real-time-intelligence/create-eventhouse)
+and [creating a KQL database](https://learn.microsoft.com/en-us/fabric/real-time-intelligence/create-database)
+for the current portal workflow.
+
 ### Prepare The Database
 
 Use a new KQL database for this revised setup. Execute individual management

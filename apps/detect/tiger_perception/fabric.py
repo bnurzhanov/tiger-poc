@@ -155,14 +155,17 @@ def generate_scenario_events(start_time: datetime | None = None) -> list[dict[st
 def read_events(paths: Iterable[Path]) -> Iterable[dict[str, Any]]:
     """Read complete JSONL files without changing detection outputs or their event IDs."""
     for path in paths:
-        with path.open(encoding="utf-8") as handle:
-            for line_number, line in enumerate(handle, start=1):
-                if not line.strip():
-                    continue
-                try:
-                    yield validate_process_event(json.loads(line))
-                except (ValueError, TypeError):
-                    raise SinkError(f"Invalid ProcessEvent at input line {line_number}.") from None
+        try:
+            with path.open(encoding="utf-8") as handle:
+                for line_number, line in enumerate(handle, start=1):
+                    if not line.strip():
+                        continue
+                    try:
+                        yield validate_process_event(json.loads(line))
+                    except (ValueError, TypeError):
+                        raise SinkError(f"Invalid ProcessEvent at input line {line_number}.") from None
+        except UnicodeError as error:
+            raise SinkError("Invalid UTF-8 JSONL input; verify the file encoding before retrying.") from error
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -219,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     except SinkError as error:
         logger.error("Relay failed: %s", error)
         exit_code = 1
-    except OSError:
+    except (OSError, UnicodeError):
         logger.error("Relay failed; verify input data, file access and Fabric configuration.")
         exit_code = 1
     except KeyboardInterrupt:

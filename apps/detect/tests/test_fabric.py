@@ -203,6 +203,21 @@ def test_given_invalid_jsonl_when_relayed_then_report_line_without_input_content
     assert "sensitive-invalid-json" not in caplog.text
 
 
+def test_given_non_utf8_jsonl_when_relayed_then_keep_decode_error_private(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Non-UTF-8 input should fail via the sanitized relay error path."""
+    source = tmp_path / "sensitive-binary.jsonl"
+    source.write_bytes(b'{"eventId":"ok"}\xff\n')
+
+    result = relay.main(["--input", str(source)])
+
+    assert result == 1
+    assert "Relay failed:" in caplog.text
+    assert "UnicodeDecodeError" not in caplog.text
+    assert "sensitive-binary" not in caplog.text
+
+
 def test_given_missing_input_when_relayed_then_keep_oserror_details_private(
     tmp_path: Path, caplog: pytest.LogCaptureFixture,
 ) -> None:
