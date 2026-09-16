@@ -52,6 +52,7 @@ module eventHubModule 'modules/eventhub.bicep' = {
     location: location
     namespaceName: eventHubNamespaceName
     eventHubName: eventHubName
+    producerPrincipalId: identityModule.outputs.principalId
     skuName: skuName
     tags: tags
   }
@@ -63,13 +64,20 @@ output eventHubNamespaceName string = eventHubNamespaceName
 @description('Event Hub Topic Name.')
 output eventHubName string = eventHubName
 
-@description('Edge Producer Connection String for environment variable configuration.')
-#disable-next-line outputs-should-not-contain-secrets
-output edgeEventHubConnectionString string = eventHubModule.outputs.edgeSenderConnectionString
+@description('Event Hubs namespace hostname for producer authentication.')
+output eventHubNamespaceHostname string = eventHubModule.outputs.namespaceHostname
 
-@description('Fabric Eventstream Consumer Connection String.')
-#disable-next-line outputs-should-not-contain-secrets
-output fabricEventstreamConnectionString string = eventHubModule.outputs.fabricConsumerConnectionString
+@description('Resource ID of the Event Hub for scoped role assignments.')
+output eventHubId string = eventHubModule.outputs.eventHubId
+
+@description('Name of the optional Listen-only Fabric consumer policy; no key is returned.')
+output fabricConsumerPolicyName string = eventHubModule.outputs.fabricConsumerPolicyName
 
 @description('Managed Identity Client ID.')
 output managedIdentityClientId string = identityModule.outputs.clientId
+
+@description('Managed Identity Principal ID for role assignments.')
+output managedIdentityPrincipalId string = identityModule.outputs.principalId
+
+@description('Managed Identity Resource ID for host attachment.')
+output managedIdentityResourceId string = identityModule.outputs.identityId

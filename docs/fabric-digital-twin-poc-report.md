@@ -1,8 +1,7 @@
 ---
+title: Factory Edge Perception to Microsoft Fabric POC Report
 description: Historical POC report with current detect execution commands and artifact ownership.
 ---
-
-# Factory Edge Perception to Microsoft Fabric POC Report
 
 **Date:** 2026-09-15  
 **Workload:** Portable Factory Perception MVP (Milestone 2 - Microsoft Fabric & Digital Twin Integration)  
@@ -19,7 +18,12 @@ description: Historical POC report with current detect execution commands and ar
 
 This document details the research, architecture planning, and implementation of connecting edge manufacturing perception workloads to **Microsoft Fabric Real-Time Intelligence**. 
 
-The solution enables localized computer vision pipelines (or non-video equipment sensors) across multiple factory cells to stream standardized `ProcessEvent` records to Fabric, continuously update a **Digital Twin Builder** ontology graph (`Plant` $\rightarrow$ `Cell` $\rightarrow$ `PalletPosition`), and render near real-time operational status on sub-second **Fabric Real-Time Dashboards** and **Power BI DirectQuery** reports.
+The current implementation provides a separate relay for completed `ProcessEvent`
+JSONL files and synthetic demos. Fabric assets describe confirmed occupancy in a
+`Plant` -> `Cell` -> `MonitoredPosition` hierarchy. Twin and dashboard JSON files
+are manual configuration references, not verified import packages. Live Fabric
+delivery, twin updates and report latency remain unverified; DirectQuery and
+refresh settings do not guarantee sub-second or five-second end-to-end updates.
 
 ---
 
@@ -34,14 +38,15 @@ The solution enables localized computer vision pipelines (or non-video equipment
 ### 1.2 Fabric Eventhouse & Digital Twin Model
 * **Eventhouse / KQL Database:** 
   - `ProcessEventsRaw`: Ingests streaming payloads.
-  - `CurrentPalletOccupancy`: Materialized view maintaining the latest confirmed boolean occupancy per position using `arg_max(capturedAt, *)`.
-  - Static Reference Hierarchy: `Plants` $\rightarrow$ `Cells` $\rightarrow$ `PalletPositions`.
+  - `ConfirmedPresenceEvents`: Typed presence events populated by a transactional update policy.
+  - `CurrentPositionOccupancy`: Materialized view maintaining the latest confirmed boolean occupancy per position using `arg_max(capturedAt, *)`.
+  - Static Reference Hierarchy: `Plants` -> `Cells` -> `MonitoredPositions`.
 * **Digital Twin Builder (Preview):** 
-  - Defined an ontology where `Plant` `containsCell` `Cell`, and `Cell` `monitorsPosition` `PalletPosition`.
-  - Telemetry binding maps `ProcessEventsRaw.subjectId` to `PalletPosition.palletPositionId` to update `isOccupied`, `confidence`, and `lastObservedTimestamp`.
+  - The reference ontology links `Plant` `containsCell` `Cell`, and `Cell` `monitorsPosition` `MonitoredPosition`.
+  - Bind `CurrentPositionOccupancy.subjectId` to `MonitoredPosition.positionId`; map confirmed `isOccupied`, `confidence`, `observationType`, and `capturedAt` (to `lastObservedTimestamp`). Raw events are not a current-state binding.
 
 ### 1.3 Real-Time Visualization
-* **Fabric Real-Time Dashboard:** Low-latency, zero-DAX configuration with 5-second auto-refresh visualizing position counts, occupancy percentage, live status matrix, transition event logs, and edge-to-cloud ingestion latency.
+* **Fabric Real-Time Dashboard:** Tile/query blueprint for confirmed position counts, occupancy percentage, last confirmed state, transitions, and ingestion latency. Configure refresh at an interval supported by the service; the blueprint is not a verified import package or latency guarantee.
 * **Power BI DirectQuery (KQL):** M query script for Power BI Desktop with Automatic Page Refresh (APR).
 
 ---
@@ -63,7 +68,7 @@ tiger-poc/
 │       ├── main.bicepparam               # Parameter file for dev environment
 │       ├── types.bicep                   # Shared Bicep type definitions
 │       ├── modules/
-│       │   ├── eventhub.bicep            # Event Hubs resource & Send/Listen SAS policies
+│       │   ├── eventhub.bicep            # Event Hubs, sender RBAC & optional consumer SAS policy
 │       │   └── identity.bicep            # User-Assigned Managed Identity
 │       └── README.md                     # IaC deployment guide
 │
@@ -97,7 +102,7 @@ tiger-poc/
         │   ├── ontology_definition.json  # Digital Twin Builder ontology (Plant -> Cell -> Position)
         │   └── twin_instances.json       # Seed twin instance graph
         └── dashboards/
-            ├── fabric_realtime_dashboard.json # Fabric Real-Time Dashboard configuration (5s auto-refresh)
+            ├── fabric_realtime_dashboard.json # Manual tile/query blueprint; refresh is service-dependent
             └── powerbi_directquery_kql.m      # Power BI DirectQuery KQL connector & setup
 ```
 
@@ -125,37 +130,12 @@ bicep build infra/digital-twin-poc/main.bicep -> Success (0 diagnostics)
 
 ### 4.1 Infrastructure Deployment (Azure CLI & Bicep)
 
-Provision the Azure Event Hubs namespace, authorization policies, and User-Assigned Managed Identity that serve as the ingestion bridge for Microsoft Fabric Eventstream:
-
-```bash
-# 1. Set environment variables
-export RESOURCE_GROUP="rg-tiger-edge-dev"
-export LOCATION="eastus"
-
-# 2. Create the resource group (if not already existing)
-az group create --name "${RESOURCE_GROUP}" --location "${LOCATION}"
-
-# 3. Validate and preview the Bicep deployment (What-If)
-az deployment group what-if \
-  --resource-group "${RESOURCE_GROUP}" \
-  --template-file infra/digital-twin-poc/main.bicep \
-  --parameters infra/digital-twin-poc/main.bicepparam
-
-# 4. Deploy the infrastructure
-az deployment group create \
-  --name "deploy-tiger-edge-$(date +%s)" \
-  --resource-group "${RESOURCE_GROUP}" \
-  --template-file infra/digital-twin-poc/main.bicep \
-  --parameters infra/digital-twin-poc/main.bicepparam
-
-# 5. Extract output connection strings for edge configuration
-EDGE_CONNECTION_STRING=$(az deployment group show \
-  --resource-group "${RESOURCE_GROUP}" \
-  --name "deploy-tiger-edge-$(date +%s)" \
-  --query "properties.outputs.edgeEventHubConnectionString.value" -o tsv)
-
-echo "Edge Producer Connection String: ${EDGE_CONNECTION_STRING}"
-```
+Follow the [infrastructure deployment guide](../infra/digital-twin-poc/README.md#deployment-commands).
+It captures `DEPLOYMENT_NAME` once and reuses it for deployment and output lookup.
+The templates create Event Hubs, a user-assigned producer identity with hub-scoped
+Data Sender access, and an optional Listen-only consumer policy. Outputs contain
+only nonsecret configuration, not connection strings. Host attachment and Fabric
+consumer configuration remain separate steps.
 
 ### 4.2 Running Detection And Publisher Tests
 
@@ -181,12 +161,14 @@ uv run --directory apps/detect --extra fabric python -m tiger_perception.fabric 
 
 ### 4.4 Running Live Ingestion to Microsoft Fabric
 
-Stream confirmed process events directly into Microsoft Fabric Eventstream over the Event Hub / AMQP endpoint:
+Before sending events, complete the Fabric database and destination setup in
+section 4.6. Configure the namespace hostname and hub name using the
+[producer authentication steps](../infra/digital-twin-poc/README.md#producer-authentication).
+On an Azure host, attach the provisioned identity and set `AZURE_CLIENT_ID` to its
+client ID. Locally, use a developer identity with a separate sender role assignment.
+Then send the demo through Event Hubs to the configured Fabric Eventstream:
 
 ```bash
-# Set Fabric Eventstream / Azure Event Hub connection string
-export FABRIC_EVENTSTREAM_CONNECTION_STRING="${EDGE_CONNECTION_STRING}"
-
 # Run live streaming simulation
 uv run --directory apps/detect --extra fabric python -m tiger_perception.fabric \
   --demo \
@@ -221,23 +203,20 @@ uv run --directory apps/detect --extra fabric python -m tiger_perception.fabric 
 
 ### 4.6 Setting up Microsoft Fabric Eventhouse & Digital Twin
 
-1. **Create Fabric Eventstream:**
-   - In your Fabric workspace, select **New** -> **Eventstream**.
-   - Add a **Custom App** source (or select **Azure Event Hubs** using the connection string from step 4.1).
-   - Add a destination targeting your Fabric **KQL Database** / Eventhouse. Table name: `ProcessEventsRaw`.
+Use the [maintained Fabric setup guide](../apps/fabric/README.md#setup) for the
+command order, consumer authentication, destination mapping and migration caveats.
+Create `ProcessEventsRaw`, reference tables `Plants`, `Cells`, `MonitoredPositions`,
+then `ConfirmedPresenceEvents` and `CurrentPositionOccupancy` before publishing.
 
-2. **Execute KQL Setup Scripts:**
-   - Open your Fabric KQL Database Queryset and execute in order:
-     - [apps/fabric/kql/01_create_tables.kql](../apps/fabric/kql/01_create_tables.kql) (creates `ProcessEventsRaw`, reference tables `Plants`, `Cells`, `PalletPositions`).
-     - [apps/fabric/kql/02_update_policy.kql](../apps/fabric/kql/02_update_policy.kql) (creates materialized view `CurrentPalletOccupancy`).
-     - [apps/fabric/kql/03_sample_queries.kql](../apps/fabric/kql/03_sample_queries.kql) (test queries).
+Use the twin assets for manual configuration, binding
+`CurrentPositionOccupancy.subjectId` to `MonitoredPosition.positionId`. Map
+`isOccupied`, `confidence`, `observationType`, and `capturedAt` to the corresponding
+properties (`capturedAt` becomes `lastObservedTimestamp`). Preserve unknown initial
+state; neither raw events nor missing events establish current occupancy.
 
-3. **Configure Digital Twin Builder (Preview):**
-   - In Fabric Real-Time Intelligence, navigate to **Digital Twin Builder**.
-   - Import the ontology model from [apps/fabric/digital_twin/ontology_definition.json](../apps/fabric/digital_twin/ontology_definition.json).
-   - Import graph instance seeds from [apps/fabric/digital_twin/twin_instances.json](../apps/fabric/digital_twin/twin_instances.json).
-   - Map streaming telemetry from table `ProcessEventsRaw` (`subjectId` -> `palletPositionId`) to update `isOccupied`, `confidence`, and `lastObservedTimestamp`.
-
-4. **Deploy Real-Time Visualizations:**
-   - **Fabric Real-Time Dashboard:** Create a new Real-Time Dashboard and import [apps/fabric/dashboards/fabric_realtime_dashboard.json](../apps/fabric/dashboards/fabric_realtime_dashboard.json) (configured for 5-second automatic refresh).
-   - **Power BI Desktop:** Open Power BI Desktop, choose **Get Data** -> **Fabric KQL Database**, select **DirectQuery** mode, paste the query from [apps/fabric/dashboards/powerbi_directquery_kql.m](../apps/fabric/dashboards/powerbi_directquery_kql.m), and enable **Automatic Page Refresh** on 5-second intervals.
+Build Fabric dashboard tiles manually from the JSON blueprint. For Power BI,
+connect using DirectQuery, choose Transform Data, and paste the full M expression
+into Power Query's Advanced Editor, not the connector's KQL query field. Configure
+each product's refresh independently at a supported interval and verify actual
+behavior after publishing. Five seconds is an optional target subject to service,
+capacity, administrator settings and query duration, not a guaranteed SLA.

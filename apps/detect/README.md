@@ -249,15 +249,28 @@ privately in the process environment. The relay does not load `apps/.env`.
 | --- | --- |
 | `FABRIC_EVENTSTREAM_NAMESPACE` | Event Hubs namespace hostname for `DefaultAzureCredential`, preferred for Azure Event Hubs |
 | `FABRIC_EVENTSTREAM_EVENTHUB_NAME` | Required with namespace authentication; optional with an entity-scoped connection string |
+| `AZURE_CLIENT_ID` | On an Azure host, selects the attached user-assigned managed identity using the `managedIdentityClientId` deployment output |
 | `FABRIC_EVENTSTREAM_CONNECTION_STRING` | Fabric Custom App source connection string, or existing Event Hubs sender credentials |
 | `FABRIC_EVENTSTREAM_REST_ENDPOINT` | Optional HTTPS ingestion endpoint accepting a single JSON object per POST; not the Fabric management API |
 | `MOCK_FABRIC` | `1`, `true`, or `yes` forces offline mode even with live arguments |
 
 Namespace authentication takes precedence over connection strings, then REST.
 Grant the publishing identity **Azure Event Hubs Data Sender** on the target hub.
-`DefaultAzureCredential` uses managed identity on a configured Azure host or an
-available developer identity locally. The relay does not assign roles or deploy
-resources. No configured destination in live mode is an error, not a dry run.
+The [infrastructure template](../../infra/digital-twin-poc/README.md) grants this
+role to its provisioned user-assigned identity. Attach that identity to your Azure
+compute host using `managedIdentityResourceId`, and set `AZURE_CLIENT_ID` to
+`managedIdentityClientId` in the relay's process environment. Set the namespace
+hostname and hub name from `eventHubNamespaceHostname` and `eventHubName` too.
+The template does not deploy a compute host or attach the identity to one.
+
+`DefaultAzureCredential` already reads `AZURE_CLIENT_ID` for its managed-identity
+candidate; this setting does not force the entire credential chain to use it.
+For local WSL or laptop execution, sign in with an available developer credential
+and grant that developer identity the sender role separately. Setting the managed
+identity's client ID does not make it available locally. The relay does not assign
+roles or deploy resources. No configured destination in live mode is an error,
+not a dry run. See the
+[Azure Identity reference](https://learn.microsoft.com/en-us/python/api/azure-identity/azure.identity.defaultazurecredential).
 
 The input mode reads completed JSONL files once; it does not tail active files,
 checkpoint delivery or retry the entire file automatically. The original event

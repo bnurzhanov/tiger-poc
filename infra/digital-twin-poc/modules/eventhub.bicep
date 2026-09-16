@@ -11,6 +11,9 @@ param namespaceName string
 @description('Name of the Event Hub for process events.')
 param eventHubName string
 
+@description('Principal ID of the managed identity authorized to publish process events.')
+param producerPrincipalId string
+
 @description('SKU name for Event Hubs namespace.')
 @allowed([
   'Basic'
@@ -56,13 +59,15 @@ resource eventHub 'Microsoft.EventHub/namespaces/eventhubs@2024-01-01' = {
   }
 }
 
-resource edgeSenderAuthRule 'Microsoft.EventHub/namespaces/eventhubs/authorizationRules@2024-01-01' = {
-  parent: eventHub
-  name: 'EdgeSenderPolicy'
+var senderRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2b629674-e913-4c01-ae53-ef4638d8f975')
+
+resource producerSenderRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(eventHub.id, producerPrincipalId, senderRoleDefinitionId)
+  scope: eventHub
   properties: {
-    rights: [
-      'Send'
-    ]
+    principalId: producerPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: senderRoleDefinitionId
   }
 }
 
@@ -85,10 +90,11 @@ output eventHubName string = eventHub.name
 @description('Service Bus / Event Hubs Endpoint URL.')
 output serviceBusEndpoint string = eventHubNamespace.properties.serviceBusEndpoint
 
-@description('Primary connection string for Edge sender with Send permission.')
-#disable-next-line outputs-should-not-contain-secrets
-output edgeSenderConnectionString string = edgeSenderAuthRule.listKeys().primaryConnectionString
+@description('Namespace hostname for Event Hubs SDK authentication.')
+output namespaceHostname string = parseUri(eventHubNamespace.properties.serviceBusEndpoint).host
 
-@description('Primary connection string for Fabric Eventstream with Listen permission.')
-#disable-next-line outputs-should-not-contain-secrets
-output fabricConsumerConnectionString string = fabricConsumerAuthRule.listKeys().primaryConnectionString
+@description('Resource ID of the Event Hub.')
+output eventHubId string = eventHub.id
+
+@description('Name of the optional Listen-only Fabric consumer policy; no key is returned.')
+output fabricConsumerPolicyName string = fabricConsumerAuthRule.name

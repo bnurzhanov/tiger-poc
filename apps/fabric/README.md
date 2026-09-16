@@ -7,8 +7,7 @@ description: Ingest the canonical detect ProcessEvent contract and query confirm
 
 Python publishing and replay live in [apps/detect](../detect/README.md#fabric-publishing-and-edge-migration).
 This directory owns only Fabric ingestion,
-KQL queries, dashboard definitions and twin reference assets. Temporary Python
-project files from the migration are retained as `.bak` files, not active projects.
+KQL queries, dashboard definitions and twin reference assets.
 
 The source of truth is detect's [ProcessEvent schema](../detect/tiger_perception/schemas/process-event-v1.json),
 [validator](../detect/tiger_perception/sinks.py) and
@@ -59,6 +58,9 @@ commands in order, before sending events:
      table, transactional update policy and aggregation-only materialized view.
 3. Create an Eventstream Custom App source, or connect the Event Hubs source
      provisioned by [the optional infrastructure](../../infra/digital-twin-poc/README.md).
+    For Event Hubs consumer authentication, follow that guide's
+    [Fabric consumer setup](../../infra/digital-twin-poc/README.md#fabric-consumer-authentication);
+    the producer identity and its sender role do not authorize Fabric to read.
      Configure the KQL destination as `ProcessEventsRaw` and map the original top-level
      JSON fields. For direct JSON ingestion, select `ProcessEventsRaw_JSON_Mapping`.
      Verify Eventstream's destination mapping too; a named KQL mapping alone does not
@@ -90,8 +92,14 @@ Null seed values mean unknown; omit those initial properties if the UI rejects n
 The [dashboard JSON](dashboards/fabric_realtime_dashboard.json) is a tile/query
 blueprint, not a verified import package. Configure the tiles against your KQL
 database. [The Power BI M query](dashboards/powerbi_directquery_kql.m) uses the same
-view and reference joins; replace the endpoint and database placeholders. Refresh
-frequency depends on service/capacity settings, not a guaranteed five-second SLA.
+view and reference joins. Connect using DirectQuery, select Transform Data, and
+replace the query in Power Query's Advanced Editor with the full M expression,
+updating its endpoint and database placeholders. Connector query fields accept
+KQL, not the full M expression. Configure Power BI automatic page refresh and
+Fabric dashboard refresh separately at supported intervals. Refresh frequency
+depends on service/capacity settings and query duration, not a guaranteed
+five-second SLA. See the [Power Query connector guidance](https://learn.microsoft.com/en-us/power-query/connectors/azure-data-explorer)
+and [Power BI refresh limits](https://learn.microsoft.com/en-us/power-bi/create-reports/desktop-automatic-page-refresh).
 
 ## State And Delivery Semantics
 

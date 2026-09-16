@@ -7,9 +7,14 @@
 //    (or "Microsoft Fabric" -> "KQL Database").
 // 2. Cluster URI: Enter your Fabric KQL Database Query URI (from Database Details).
 // 3. Database Name: Enter your Eventhouse / KQL Database name.
-// 4. Data Connectivity mode: Select "DirectQuery" (for sub-second / real-time updates).
-// 5. In Advanced Options, paste the M expression below or select "CurrentPositionOccupancy".
-// 6. In Report View: Enable "Page refresh" in the Format pane and set duration to 5 seconds.
+// 4. Select "DirectQuery". This mode does not guarantee sub-second updates.
+// 5. Select "CurrentPositionOccupancy", then "Transform Data". In Power Query's
+//    "Advanced Editor", replace the query with the full M expression below and
+//    update the endpoint/database placeholders. Connector query fields accept KQL,
+//    not a complete M expression. Select "Done", then "Close & Apply".
+// 6. In Report View, enable "Page refresh" for the page at a supported interval.
+//    Five seconds is an optional target, subject to capacity/admin settings and
+//    query duration. Verify the effective interval again after publishing.
 // ==============================================================================
 
 let
