@@ -1,6 +1,7 @@
-/*
-  Managed Identity module for edge-to-cloud secure authentication.
-*/
+metadata name = 'identity-module'
+metadata description = 'Managed Identity module for edge-to-cloud secure authentication.'
+
+import { ResourceTags } from '../types.bicep'
 
 @description('Azure region for the Managed Identity.')
 param location string
@@ -9,7 +10,7 @@ param location string
 param identityName string
 
 @description('Resource tags.')
-param tags object
+param tags ResourceTags
 
 resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: identityName

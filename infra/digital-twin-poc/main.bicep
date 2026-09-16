@@ -1,6 +1,5 @@
-/*
-  Main orchestration template for Factory Edge to Microsoft Fabric Ingestion Infrastructure.
-*/
+metadata name = 'factory-edge-digital-twin-main'
+metadata description = 'Main orchestration template for Factory Edge to Microsoft Fabric ingestion infrastructure.'
 
 import { Environment, ResourceTags } from './types.bicep'
 

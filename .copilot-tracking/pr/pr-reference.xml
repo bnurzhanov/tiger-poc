@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<diff>
+  <branch>feature/fabric-digital-twin-poc</branch>
+  <base>main</base>
+  <files>
+    <file path="apps/detect/manifests/cell-a-jeep.yaml" />
+    <file path="apps/detect/manifests/cell-a.yaml" />
+    <file path="apps/detect/manifests/cell-b-pallet.yaml" />
+    <file path="apps/detect/manifests/cell-b.yaml" />
+    <file path="apps/detect/rtsp_yolo.py" />
+    <file path="apps/detect/tests/fixtures/process-event-invalid.json" />
+    <file path="apps/detect/tests/fixtures/process-event-valid.json" />
+    <file path="apps/detect/tests/test_adapters.py" />
+    <file path="apps/detect/tests/test_config.py" />
+    <file path="apps/detect/tests/test_contracts.py" />
+    <file path="apps/detect/tests/test_fabric.py" />
+    <file path="apps/detect/tests/test_fabric_contracts.py" />
+    <file path="apps/detect/tests/test_local_jsonl_sink.py" />
+    <file path="apps/detect/tests/test_presence.py" />
+    <file path="apps/detect/tests/test_runner.py" />
+    <file path="apps/detect/tests/test_viewer.py" />
+    <file path="apps/detect/tiger_perception/__init__.py" />
+    <file path="apps/detect/tiger_perception/adapters.py" />
+    <file path="apps/detect/tiger_perception/config.py" />
+    <file path="apps/detect/tiger_perception/contracts.py" />
+    <file path="apps/detect/tiger_perception/fabric.py" />
+    <file path="apps/detect/tiger_perception/mapping.py" />
+    <file path="apps/detect/tiger_perception/presence.py" />
+    <file path="apps/detect/tiger_perception/replay.py" />
+    <file path="apps/detect/tiger_perception/runner.py" />
+    <file path="apps/detect/tiger_perception/schemas/process-event-v1.json" />
+    <file path="apps/detect/tiger_perception/sinks.py" />
+    <file path="apps/detect/tiger_perception/viewer.html" />
+    <file path="apps/detect/tiger_perception/viewer.py" />
+    <file path="apps/docker-compose.yml" />
+    <file path="apps/fabric/dashboards/fabric_realtime_dashboard.json" />
+    <file path="apps/fabric/dashboards/powerbi_directquery_kql.m" />
+    <file path="apps/fabric/digital_twin/ontology_definition.json" />
+    <file path="apps/fabric/digital_twin/twin_instances.json" />
+    <file path="apps/fabric/kql/01_create_tables.kql" />
+    <file path="apps/fabric/kql/02_update_policy.kql" />
+    <file path="apps/fabric/kql/03_sample_queries.kql" />
+    <file path="infra/digital-twin-poc/main.bicep" />
+    <file path="infra/digital-twin-poc/main.bicepparam" />
+    <file path="infra/digital-twin-poc/modules/eventhub.bicep" />
+    <file path="infra/digital-twin-poc/modules/identity.bicep" />
+    <file path="infra/digital-twin-poc/types.bicep" />
+    <file path="manifest.yaml" />
+  </files>
+</diff>

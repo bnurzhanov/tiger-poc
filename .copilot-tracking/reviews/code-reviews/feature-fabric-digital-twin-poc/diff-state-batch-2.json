@@ -1,0 +1,32 @@
+{
+  "branch": "feature/fabric-digital-twin-poc",
+  "base": "main",
+  "files": [
+    "apps/fabric/dashboards/fabric_realtime_dashboard.json",
+    "apps/fabric/dashboards/powerbi_directquery_kql.m",
+    "apps/fabric/digital_twin/ontology_definition.json",
+    "apps/fabric/digital_twin/twin_instances.json",
+    "apps/fabric/kql/01_create_tables.kql",
+    "apps/fabric/kql/02_update_policy.kql",
+    "apps/fabric/kql/03_sample_queries.kql",
+    "infra/digital-twin-poc/main.bicep",
+    "infra/digital-twin-poc/main.bicepparam",
+    "infra/digital-twin-poc/modules/eventhub.bicep",
+    "infra/digital-twin-poc/modules/identity.bicep",
+    "infra/digital-twin-poc/types.bicep",
+    "manifest.yaml"
+  ],
+  "untrackedFiles": [],
+  "extensions": [
+    "bicep",
+    "bicepparam",
+    "json",
+    "kql",
+    "m",
+    "yaml"
+  ],
+  "tshirtSize": "XL",
+  "diffPatchPath": ".copilot-tracking/pr/pr-reference.xml",
+  "findingsFolder": "copilot-tracking/reviews/code-reviews/feature-fabric-digital-twin-poc/",
+  "findingsFile": "findings-batch-2.json"
+}

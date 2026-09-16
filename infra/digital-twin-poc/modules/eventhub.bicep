@@ -1,6 +1,7 @@
-/*
-  Azure Event Hubs module for Fabric Eventstream Custom App ingestion endpoint.
-*/
+metadata name = 'eventhub-module'
+metadata description = 'Azure Event Hubs module for Fabric Eventstream Custom App ingestion endpoint.'
+
+import { ResourceTags } from '../types.bicep'
 
 @description('Azure region for the Event Hubs namespace.')
 param location string
@@ -32,7 +33,7 @@ param messageRetentionInDays int = 1
 param partitionCount int = 2
 
 @description('Resource tags.')
-param tags object
+param tags ResourceTags
 
 resource eventHubNamespace 'Microsoft.EventHub/namespaces@2024-01-01' = {
   name: namespaceName

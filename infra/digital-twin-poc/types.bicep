@@ -1,6 +1,5 @@
-/*
-  Type definitions for Factory Perception and Microsoft Fabric Edge Ingestion infrastructure.
-*/
+metadata name = 'factory-edge-types'
+metadata description = 'Shared type definitions for the Factory Edge to Microsoft Fabric deployment.'
 
 @description('Deployment environment name.')
 @export()
