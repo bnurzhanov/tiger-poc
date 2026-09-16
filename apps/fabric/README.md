@@ -19,9 +19,10 @@ boolean value and `unit == "boolean"` can update occupancy.
 
 Plant metadata is optional on the wire. Occupancy queries join stable subject IDs
 to reference tables instead of depending on payload plant fields. Seeded IDs match
-the current detect manifests: cell A object, cell B object, and cell B pallet.
-The two cell B manifests are alternatives, not simultaneous owners of one output.
-Update the reference rows when configuring other sources or subjects.
+the current detect manifests: cell A object, cell A pallet (root `manifest.yaml`
+subject), cell B object, and cell B pallet. The two cell B manifests are
+alternatives, not simultaneous owners of one output. Update the reference rows
+when configuring other sources or subjects.
 
 ## Data Flow
 
@@ -56,6 +57,9 @@ commands in order, before sending events:
      JSON mapping and the ingestion-time policy. Run the reference seeds once.
 2. Run [02_update_policy.kql](kql/02_update_policy.kql) to create the typed presence
      table, transactional update policy and aggregation-only materialized view.
+     Wait for the returned `.create async materialized-view` operation to complete
+     before continuing to twin bindings and query validation; until it finishes,
+     `CurrentPositionOccupancy` can be unavailable even though the command returned.
 3. Create an Eventstream Custom App source, or connect the Event Hubs source
      provisioned by [the optional infrastructure](../../infra/digital-twin-poc/README.md).
     For Event Hubs consumer authentication, follow that guide's

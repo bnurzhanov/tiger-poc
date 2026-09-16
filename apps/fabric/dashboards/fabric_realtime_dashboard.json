@@ -56,7 +56,7 @@
       "id": "tile-ingestion-latency",
       "title": "Edge-to-Cloud Latency (Seconds)",
       "visualType": "timechart",
-      "query": "ProcessEventsRaw | where capturedAt > ago(30m) | extend LatencySec = datetime_diff('second', ingestion_time(), capturedAt) | summarize AvgLatency = avg(LatencySec) by bin(capturedAt, 1m)",
+      "query": "ProcessEventsRaw | where ingestion_time() > ago(30m) | extend LatencySec = datetime_diff('second', ingestion_time(), capturedAt) | summarize AvgLatency = avg(LatencySec) by bin(ingestion_time(), 1m)",
       "size": { "width": 4, "height": 4 },
       "position": { "row": 6, "col": 8 }
     }
