@@ -114,12 +114,22 @@ tiger-poc/
 The original POC recorded nine passing tests for its former standalone prototype.
 That historical result is not a verification of the current implementation.
 The supported suite in [apps/detect/tests](../apps/detect/tests) covers contracts,
-presence rules, Fabric publishing and multi-cell replay. On 2026-09-15,
-`cd apps/detect && uv run pytest tests -q` passed 102 tests at base commit
-`4983ff49610f3b1c13a614ab144d417f3ed7df3f` with the review fixes in the
-working tree. Coverage includes root-manifest identity, historical demo timestamps,
-relay error diagnostics and both publisher authentication paths.
-Live Fabric delivery and KQL execution remain unverified.
+presence rules, Fabric publishing and multi-cell replay. On 2026-09-15, the no-extra local run
+`cd apps/detect && uv run pytest tests -q` passed 102 tests at the base commit
+`4983ff49610f3b1c13a614ab144d417f3ed7df3f`. That result is not sufficient to claim
+Fabric coverage because the optional Azure SDK is not installed in that command, and
+`pytest.importorskip` skips the Event Hubs authentication-path tests in a clean environment.
+The command that verifies the full Fabric-enabled path is:
+
+```bash
+uv run --project apps/detect --extra fabric pytest apps/detect/tests -q
+```
+
+This passed 104 tests in 32.62s on 2026-09-16, exercising both publisher authentication
+paths and the Fabric-specific regression coverage. The earlier 87-test PR description was an
+older summary count for the pre-review subset, while the 102-test no-extra run reflected the
+current suite without the optional Azure dependencies. Live Fabric delivery and KQL execution
+remain unverified beyond the local end-to-end unit coverage.
 
 ### 3.2 Bicep Compilation & IaC Linting
 Bicep templates compile cleanly to ARM JSON without warnings:

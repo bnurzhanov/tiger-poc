@@ -209,10 +209,10 @@ def main(argv: list[str] | None = None) -> int:
                 if args.demo
                 else read_events(args.input)
             )
-            for event in events:
+            for index, event in enumerate(events):
                 sink.publish(event)
                 published += 1
-                if args.interval:
+                if args.interval and index < len(events) - 1:
                     time.sleep(args.interval)
         logger.info("%s %d events", "Validated" if sink.dry_run else "Published", published)
         return 0

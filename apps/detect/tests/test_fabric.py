@@ -106,6 +106,37 @@ def test_given_demo_cycles_when_relayed_immediately_then_all_events_end_by_run_s
     assert (captured[-1] - captured[0]).total_seconds() == 29 * iterations - 1
 
 
+def test_given_publish_interval_when_relayed_then_skip_sleep_after_last_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pause only between publications, not after the final event."""
+    sleep_calls: list[float] = []
+    published: list[dict[str, Any]] = []
+
+    class StubSink:
+        dry_run = True
+
+        def publish(self, event: dict[str, Any]) -> None:
+            """Capture the event stream without network effects."""
+            published.append(event)
+
+        def close(self) -> None:
+            """No-op cleanup for the relay test."""
+
+    monkeypatch.setattr(relay, "FabricEventstreamSink", lambda **kwargs: StubSink())
+    monkeypatch.setattr(relay.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    result = relay.main([
+        "--demo",
+        "--interval", "0.5",
+        "--output", str(tmp_path / "demo.jsonl"),
+    ])
+
+    assert result == 0
+    assert len(published) == 6
+    assert sleep_calls == [0.5, 0.5, 0.5, 0.5, 0.5]
+
+
 def test_given_invalid_jsonl_when_relayed_then_report_line_without_input_contents(
     tmp_path: Path, caplog: pytest.LogCaptureFixture,
 ) -> None:
