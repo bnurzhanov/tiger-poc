@@ -4,5 +4,6 @@
 data/
 models/
 .env
+apps/secrets/
 **/.ruff_cache/*
 *.bak

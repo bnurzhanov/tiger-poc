@@ -1,10 +1,70 @@
+x-runtime: &runtime
+  image: tiger-perception:local
+  build:
+    context: ./detect
+  init: true
+  restart: unless-stopped
+
 services:
   detect:
-    build:
-      context: ./detect
+    <<: *runtime
     environment:
-      RTSP_URL: ${RTSP_URL:-rtsp://localhost:554/cam/realmonitor?channel=1&subtype=0}
-      YOLO_MODEL: ${YOLO_MODEL:-/app/yolo26n.pt}
+      CAMERA_A_RTSP_URL: ${CAMERA_A_RTSP_URL:?Set CAMERA_A_RTSP_URL in apps/.env}
     volumes:
-      - ./detect/detections.jsonl:/app/detections.jsonl
-    restart: unless-stopped
+      - ../data:/workspace/data
+
+  viewer:
+    <<: *runtime
+    command:
+      - uv
+      - run
+      - --no-sync
+      - python
+      - -m
+      - tiger_perception.viewer
+      - --manifest
+      - manifests/cell-a-jeep.yaml
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8765"
+    ports:
+      - "127.0.0.1:${VIEWER_PORT:-8765}:8765"
+    volumes:
+      - ../data:/workspace/data:ro
+    healthcheck:
+      test: ["CMD", "uv", "run", "--no-sync", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/cells', timeout=3).close()"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  publisher:
+    <<: *runtime
+    profiles: [fabric]
+    command:
+      - uv
+      - run
+      - --no-sync
+      - python
+      - -m
+      - tiger_perception.fabric
+      - --input
+      - /workspace/data/cell-a/jeep-events.jsonl
+      - --follow
+      - --checkpoint
+      - /var/lib/tiger-publisher/delivery.json
+      - --live-fabric
+    environment:
+      FABRIC_EVENTSTREAM_CONNECTION_STRING_FILE: /run/secrets/fabric_connection_string
+    secrets:
+      - fabric_connection_string
+    volumes:
+      - ../data:/workspace/data:ro
+      - publisher-state:/var/lib/tiger-publisher
+
+secrets:
+  fabric_connection_string:
+    file: ./secrets/fabric-connection-string
+
+volumes:
+  publisher-state:

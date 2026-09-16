@@ -7,7 +7,7 @@ description: Run independent manifest-driven camera workloads, inspect confirmed
 
 Each local process reads one RTSP camera, runs Ultralytics detection, confirms one
 configured region's occupancy, and writes its own schema-validated `ProcessEvent`
-JSONL output. No cloud service is required. A loopback-only browser view reads both
+JSONL output. No cloud service is required. A localhost-by-default browser view reads both
 processes' status files and annotated previews without accessing camera credentials.
 
 The bundled `yolo26n.pt` supports **chair**, not pallet. The prepared
@@ -91,6 +91,68 @@ The original `rtsp_yolo.py` arguments remain supported for per-frame detection
 diagnostics. They are not the milestone presence pipeline. Use `--manifest` for
 the new runner; use `python -m tiger_perception.viewer` from the detector directory
 for the viewer, not its Python file path.
+
+## Docker Compose
+
+[Compose](../docker-compose.yml) runs the Cell A Jeep trial (`car` detection),
+its browser viewer, and an optional live Fabric publisher. It does not provision
+Fabric items. Create the Eventstream Custom App source before enabling publishing.
+Docker Engine with Compose must be available from WSL. The build uses the approved
+Python package feed, disables automatic interpreter downloads, and uses Python
+from the base image. Building also requires access to Docker Hub, GHCR, and Debian
+package repositories under your organization's policies.
+
+Privately configure `CAMERA_A_RTSP_URL` in `apps/.env`. Use the camera's reachable
+LAN address; `localhost` inside the container refers to the container itself.
+From the repository root, start the local camera and viewer:
+
+```bash
+mkdir -p data
+docker compose --env-file apps/.env -f apps/docker-compose.yml up --build -d
+```
+
+Open <http://127.0.0.1:8765>. Set `VIEWER_PORT` in the environment file if that port
+is occupied. The image runs as UID/GID 1000; the host data directory and secret
+file must be accessible to that identity. Do not make credentials world-readable.
+The viewer binds to all container interfaces but publishes its host port only on
+loopback. It has no authentication and must not be exposed to the LAN or internet.
+The detector alone receives camera credentials. The viewer and publisher mount
+detector output read-only.
+
+To enable live Fabric publishing, put the Custom App source's complete connection
+string into `apps/secrets/fabric-connection-string`. That directory is gitignored.
+For example, enter it privately without placing the value in shell history:
+
+```bash
+mkdir -p apps/secrets
+chmod 700 apps/secrets
+read -rsp 'Fabric connection string: ' fabric_connection_string
+printf '\n'
+(umask 077; printf '%s' "$fabric_connection_string" > apps/secrets/fabric-connection-string)
+unset fabric_connection_string
+
+docker compose --env-file apps/.env -f apps/docker-compose.yml --profile fabric up --build -d
+```
+
+The publisher reads the mounted secret file, waits for the detector's event file,
+then follows complete new records. Its first run also sends any existing backlog.
+Only the publisher receives this secret. Compose secret files are local files,
+not an encrypted secret store. Never commit them or paste their contents into logs.
+
+```bash
+docker compose --env-file apps/.env -f apps/docker-compose.yml --profile fabric logs -f detect publisher
+docker compose --env-file apps/.env -f apps/docker-compose.yml --profile fabric down
+```
+
+The publisher's delivery checkpoint lives in the `publisher-state` named volume
+at `/var/lib/tiger-publisher/delivery.json`, separate from Fabric provisioning
+checkpoints. Ordinary `down` retains it; do not use `down -v` during normal
+restarts. The detector's event, status, and preview files stay in the host `data`
+directory. Keep event files append-only. Do not rotate, truncate, or replace a
+followed file without stopping the publisher and reconciling its delivery state.
+This version does not automatically compact acknowledged files; monitor disk space.
+Changing the camera manifest also requires matching viewer and publisher input
+paths in Compose. Do not run a host detector against the same outputs concurrently.
 
 ## Configuration Contract
 
@@ -251,6 +313,7 @@ privately in the process environment. The relay does not load `apps/.env`.
 | `FABRIC_EVENTSTREAM_EVENTHUB_NAME` | Required with namespace authentication; optional with an entity-scoped connection string |
 | `AZURE_CLIENT_ID` | On an Azure host, selects the attached user-assigned managed identity using the `managedIdentityClientId` deployment output |
 | `FABRIC_EVENTSTREAM_CONNECTION_STRING` | Fabric Custom App source connection string, or existing Event Hubs sender credentials |
+| `FABRIC_EVENTSTREAM_CONNECTION_STRING_FILE` | UTF-8 file containing the connection string, used when namespace and direct connection string are unset |
 | `MOCK_FABRIC` | `1`, `true`, or `yes` forces offline mode even with live arguments |
 
 Namespace authentication takes precedence over connection strings.
@@ -271,15 +334,37 @@ roles or deploy resources. No configured destination in live mode is an error,
 not a dry run. See the
 [Azure Identity reference](https://learn.microsoft.com/en-us/python/api/azure-identity/azure.identity.defaultazurecredential).
 
-The input mode reads completed JSONL files once; it does not tail active files,
-checkpoint delivery or retry the entire file automatically. The original event
-IDs, timestamps and observation evidence are retained, with canonical secret
-redaction. Local traces are audit copies, not remote delivery acknowledgments.
-Rerunning a file can resend events; deduplicate by `eventId` downstream. Azure SDK
-transport retries remain enabled; publication failures stop the relay. A trace must
-never share a path with an input or an active detector output. `--iterations`
-repeats only the demo, and `--interval` controls wall-clock pacing independently
-of event time.
+Without `--follow`, input mode reads completed JSONL files once. For continuous
+publication from a running detector, configure the destination privately and run:
+
+```bash
+uv run --directory apps/detect --extra fabric python -m tiger_perception.fabric \
+  --input ../../data/cell-a/jeep-events.jsonl --follow \
+  --checkpoint ../../data/fabric-delivery/jeep.json --live-fabric
+```
+
+Follow mode starts from the beginning without a checkpoint, waits for input files
+to appear, and reads only newline-terminated records (up to 1 MiB each). It uses
+an exclusive Linux file lock and atomically saves each byte offset after the SDK
+acknowledges publication. Multiple inputs are polled fairly; a partial line in one
+does not block another. `--poll-interval` defaults to 0.25 seconds. Use one durable
+checkpoint per input set and destination; dry-run checkpoints cannot be reused
+for live delivery. Do not change a destination while reusing its delivery state.
+
+Invalid records, replaced/truncated inputs, and publication failures stop the
+relay without skipping the failed event. SDK retries remain enabled; Compose
+restarts the publisher after failure and resumes its acknowledged offsets. A crash
+between remote acceptance and saving the checkpoint can resend an event: delivery
+is at-least-once, not exactly-once. Deduplicate by `eventId` downstream. Checkpoint
+locking only prevents duplicate publishers using that same checkpoint; do not run
+multiple publishers with different checkpoints against the same destination/input.
+
+Original IDs, timestamps and evidence are retained with canonical secret redaction.
+Local audit traces are not remote delivery acknowledgments and are unnecessary
+for the normal Compose publisher. Audit output and checkpoint paths must differ
+from every input. `--iterations` repeats only the demo; `--interval` paces one-shot
+publication. A presence event represents initialization or a confirmed transition,
+not every frame. Silence still does not mean empty occupancy or camera health.
 
 Run publisher and artifact checks with the optional dependencies installed:
 

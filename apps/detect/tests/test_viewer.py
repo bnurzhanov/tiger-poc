@@ -9,9 +9,17 @@ from urllib.request import urlopen
 
 import pytest
 from tiger_perception.config import load_workload
-from tiger_perception.viewer import cell_status, create_server
+from tiger_perception.viewer import cell_status, create_parser, create_server
 
 MANIFESTS = Path(__file__).parents[1] / "manifests"
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "0.0.0.0"])
+def test_given_bind_option_when_server_created_then_use_selected_address(host):
+    args = create_parser().parse_args(["--manifest", str(MANIFESTS / "cell-a.yaml"),
+                                      *(["--host", host] if host != "127.0.0.1" else [])])
+    with create_server([load_workload(args.manifest[0])], 0, host=args.host) as server:
+        assert server.server_address[0] == host
 
 
 def test_given_stopped_producer_when_viewing_then_retain_value_but_mark_unavailable(tmp_path):

@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from tiger_perception import fabric as relay
 from tiger_perception.contracts import ProcessEvent
 from tiger_perception.sinks import (
@@ -23,6 +22,7 @@ def isolated_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "FABRIC_EVENTSTREAM_CONNECTION_STRING", "FABRIC_EVENTSTREAM_EVENTHUB_NAME",
         "FABRIC_EVENTSTREAM_NAMESPACE", "MOCK_FABRIC",
+        "FABRIC_EVENTSTREAM_CONNECTION_STRING_FILE",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -426,3 +426,175 @@ def test_given_input_as_output_when_relayed_then_refuse_to_modify(tmp_path: Path
         relay.main(["--input", str(source), "--output", str(source)])
 
     assert source.read_text() == "unchanged\n"
+
+
+def test_given_live_appends_when_followed_then_wait_for_newline_and_resume(tmp_path: Path) -> None:
+    source = tmp_path / "events.jsonl"
+    checkpoint = tmp_path / "delivery.json"
+    events = relay.generate_scenario_events()[:2]
+    published = []
+
+    with relay.JsonlFollower([source], checkpoint, dry_run=False) as follower:
+        assert follower.poll_once(published.append) == 0
+        source.write_text(json.dumps(events[0]), encoding="utf-8")
+        assert follower.poll_once(published.append) == 0
+        assert not checkpoint.exists()
+        with source.open("a", encoding="utf-8") as handle:
+            handle.write("\n")
+        assert follower.poll_once(published.append) == 1
+        assert follower.poll_once(published.append) == 0
+
+    with source.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(events[1]) + "\n")
+    with relay.JsonlFollower([source], checkpoint, dry_run=False) as follower:
+        assert follower.poll_once(published.append) == 1
+    assert published == events
+
+
+def test_given_failed_send_when_following_then_retry_same_event_on_restart(tmp_path: Path) -> None:
+    source = tmp_path / "events.jsonl"
+    checkpoint = tmp_path / "delivery.json"
+    events = relay.generate_scenario_events()[:2]
+    source.write_text("".join(json.dumps(event) + "\n" for event in events))
+
+    def fail_second(event):
+        if event == events[1]:
+            raise SinkUnavailableError("offline")
+
+    with relay.JsonlFollower([source], checkpoint, dry_run=False) as follower, pytest.raises(SinkUnavailableError):
+        follower.poll_once(fail_second)
+    published = []
+    with relay.JsonlFollower([source], checkpoint, dry_run=False) as follower:
+        assert follower.poll_once(published.append) == 1
+    assert published == events[1:]
+
+
+@pytest.mark.parametrize("change", ["truncate", "replace", "corrupt"])
+def test_given_changed_input_when_following_then_fail_without_skipping(tmp_path: Path, change: str) -> None:
+    source = tmp_path / "events.jsonl"
+    checkpoint = tmp_path / "delivery.json"
+    content = json.dumps(relay.generate_scenario_events()[0]) + "\n"
+    source.write_text(content)
+    with relay.JsonlFollower([source], checkpoint, dry_run=False) as follower:
+        follower.poll_once(lambda event: True)
+        original = checkpoint.read_bytes()
+        if change == "replace":
+            source.rename(tmp_path / "old.jsonl")
+            source.write_text(content)
+        else:
+            source.write_text("" if change == "truncate" else "x" * len(content))
+        with pytest.raises(SinkError, match="replaced or truncated"):
+            follower.poll_once(lambda event: pytest.fail("Unexpected publication"))
+        assert checkpoint.read_bytes() == original
+
+
+def test_given_checkpoint_owner_when_second_follower_starts_then_refuse(tmp_path: Path) -> None:
+    source = tmp_path / "events.jsonl"
+    checkpoint = tmp_path / "delivery.json"
+    with (relay.JsonlFollower([source], checkpoint, dry_run=False),
+          pytest.raises(SinkError, match="ownership"),
+          relay.JsonlFollower([source], checkpoint, dry_run=False)):
+        pytest.fail("Second follower acquired checkpoint")
+
+
+def test_given_dry_run_checkpoint_when_live_starts_then_refuse(tmp_path: Path) -> None:
+    source = tmp_path / "events.jsonl"
+    source.write_text(json.dumps(relay.generate_scenario_events()[0]) + "\n")
+    checkpoint = tmp_path / "delivery.json"
+    with relay.JsonlFollower([source], checkpoint, dry_run=True) as follower:
+        follower.poll_once(lambda event: True)
+    with pytest.raises(SinkError, match="checkpoint"), relay.JsonlFollower([source], checkpoint, dry_run=False):
+        pytest.fail("Dry run was reused as live delivery")
+
+
+@pytest.mark.parametrize("content", [b"invalid\n", b"\xff\n", b"x" * (1024 * 1024 + 1)])
+def test_given_invalid_live_record_when_followed_then_fail_without_acknowledging(tmp_path: Path, content: bytes) -> None:
+    source = tmp_path / "events.jsonl"
+    source.write_bytes(content)
+    checkpoint = tmp_path / "delivery.json"
+    with relay.JsonlFollower([source], checkpoint, dry_run=False) as follower, pytest.raises(SinkError):
+        follower.poll_once(lambda event: pytest.fail("Unexpected publication"))
+    assert not checkpoint.exists()
+
+
+def test_given_multiple_inputs_when_one_is_partial_then_other_input_progresses(tmp_path: Path) -> None:
+    first, second = tmp_path / "first.jsonl", tmp_path / "second.jsonl"
+    events = relay.generate_scenario_events()[:2]
+    first.write_text(json.dumps(events[0]))
+    second.write_text(json.dumps(events[1]) + "\n")
+    published = []
+    with relay.JsonlFollower([first, second], tmp_path / "state.json", dry_run=False) as follower:
+        assert follower.poll_once(published.append) == 1
+    assert published == events[1:]
+
+
+def test_given_follow_cli_when_new_events_arrive_then_publish_until_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, checkpoint, audit = (tmp_path / name for name in ("events.jsonl", "state.json", "audit.jsonl"))
+    event = relay.generate_scenario_events()[0]
+    polls = []
+
+    def append_then_interrupt(seconds):
+        polls.append(seconds)
+        if len(polls) == 1:
+            source.write_text(json.dumps(event) + "\n")
+        else:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(relay.time, "sleep", append_then_interrupt)
+    result = relay.main(["--input", str(source), "--follow", "--checkpoint", str(checkpoint),
+                         "--dry-run", "--output", str(audit)])
+
+    assert result == 130
+    assert json.loads(audit.read_text()) == event
+    assert json.loads(checkpoint.read_text())["positions"][str(source)]["offset"] == source.stat().st_size
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--demo", "--follow"], ["--input", "events", "--follow"],
+    ["--demo", "--checkpoint", "state"], ["--demo", "--poll-interval", "nan"],
+    ["--demo", "--poll-interval", "0"],
+])
+def test_given_invalid_follow_options_when_parsed_then_reject(arguments: list[str]) -> None:
+    with pytest.raises(SystemExit):
+        relay.main(arguments)
+
+
+@pytest.mark.parametrize("collision", ["input", "audit", "lock", "temporary"])
+def test_given_follow_path_collision_when_started_then_leave_files_unchanged(tmp_path: Path, collision: str) -> None:
+    source, state, audit = (tmp_path / name for name in ("events.jsonl", "state.json", "audit.jsonl"))
+    if collision == "input":
+        state = source
+    elif collision == "audit":
+        audit = state
+    elif collision == "lock":
+        source = state.with_suffix(".json.lock")
+    else:
+        source = state.with_suffix(".json.tmp")
+    source.write_text("unchanged\n")
+
+    with pytest.raises(SystemExit):
+        relay.main(["--input", str(source), "--follow", "--checkpoint", str(state), "--output", str(audit)])
+    assert source.read_text() == "unchanged\n"
+
+
+def test_given_secret_file_when_live_sink_created_then_load_without_environment_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = tmp_path / "connection"
+    secret.write_text("test-only-secret\n")
+    monkeypatch.setenv("FABRIC_EVENTSTREAM_CONNECTION_STRING_FILE", str(secret))
+
+    sink = relay.FabricEventstreamSink()
+
+    assert sink.connection_string == "test-only-secret"
+
+
+def test_given_unreadable_secret_when_live_sink_created_then_fail_without_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FABRIC_EVENTSTREAM_CONNECTION_STRING_FILE", str(tmp_path / "private-secret"))
+    with pytest.raises(SinkError, match="secret file") as failure:
+        relay.FabricEventstreamSink()
+    assert "private-secret" not in str(failure.value)

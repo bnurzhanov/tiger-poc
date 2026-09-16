@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import re
+import ssl
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
@@ -21,6 +22,8 @@ from infra.fabric.deploy import (
     Deployment,
     DeploymentError,
     FabricClient,
+    create_http_client,
+    create_parser,
     encode_definition,
     main,
 )
@@ -512,6 +515,71 @@ def test_given_empty_workspace_when_applied_twice_then_second_run_creates_nothin
         == deployment.state["items"]["database"]
     )
     assert topology["destinations"][0]["properties"]["tableName"] == "ProcessEventsRaw"
+
+
+@pytest.mark.parametrize("query", [False, True])
+def test_given_database_display_name_when_kql_sent_then_item_id_is_used(
+    tmp_path, query
+) -> None:
+    database_id = "00000000-0000-4000-8000-000000000002"
+    requests = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "displayName": "tiger_events_db",
+                    "properties": {
+                        "queryServiceUri": "https://test.kusto.fabric.microsoft.com"
+                    },
+                },
+            )
+        return httpx.Response(200, json={"Tables": []})
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        deployment = Deployment(
+            FabricClient(http, lambda scope: "test-token"),
+            load_config(ROOT / "infra/fabric/config.json"),
+            "00000000-0000-4000-8000-000000000001",
+            tmp_path / "state.json",
+        )
+        deployment.state["items"]["database"] = database_id
+
+        deployment.kql("print value=1" if query else ".show tables", query=query)
+
+    assert requests[0].url.path.endswith(f"/kqlDatabases/{database_id}")
+    assert requests[1].url.path == ("/v1/rest/query" if query else "/v1/rest/mgmt")
+    assert json.loads(requests[1].content)["db"] == database_id
+
+
+@pytest.mark.parametrize("tls12", [False, True])
+def test_given_tls_option_when_client_created_then_certificate_checks_remain_enabled(
+    monkeypatch, tls12
+) -> None:
+    options = {}
+    sentinel = object()
+
+    def capture_client(**kwargs):
+        options.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(httpx, "Client", capture_client)
+    args = create_parser().parse_args(["status", *(["--tls12"] if tls12 else [])])
+
+    assert create_http_client(tls12=args.tls12) is sentinel
+    assert options["follow_redirects"] is False
+    if tls12:
+        context = options["verify"]
+        assert isinstance(context, ssl.SSLContext)
+        assert (
+            context.minimum_version == context.maximum_version == ssl.TLSVersion.TLSv1_2
+        )
+        assert context.verify_mode == ssl.CERT_REQUIRED
+        assert context.check_hostname is True
+    else:
+        assert options["verify"] is True
 
 
 @pytest.mark.parametrize("connection_error", [httpx.ConnectError, httpx.ConnectTimeout])

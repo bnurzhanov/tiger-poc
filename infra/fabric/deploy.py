@@ -15,6 +15,7 @@ import hashlib
 import json
 import logging
 import re
+import ssl
 import subprocess
 import sys
 import time
@@ -353,7 +354,7 @@ class Deployment:
                 headers={
                     "Authorization": f"Bearer {self.client.token(endpoint + '/.default')}"
                 },
-                json={"db": database["displayName"], "csl": command},
+                json={"db": self.state["items"]["database"], "csl": command},
             )
         except (httpx.ConnectError, httpx.ConnectTimeout) as error:
             raise DeploymentError(
@@ -568,6 +569,16 @@ class Deployment:
             self.save()
 
 
+def create_http_client(*, tls12: bool = False) -> httpx.Client:
+    """Create a verified HTTP client with optional TLS 1.2 compatibility."""
+    verification: ssl.SSLContext | bool = True
+    if tls12:
+        verification = ssl.create_default_context()
+        verification.minimum_version = ssl.TLSVersion.TLSv1_2
+        verification.maximum_version = ssl.TLSVersion.TLSv1_2
+    return httpx.Client(verify=verification, timeout=60, follow_redirects=False)
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Build the deployment CLI without authenticating."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -590,6 +601,11 @@ def create_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--timeout", type=int, default=1800, help="Maximum seconds per async operation"
+    )
+    parser.add_argument(
+        "--tls12",
+        action="store_true",
+        help="Use verified TLS 1.2 for Fabric/KQL HTTP calls (network compatibility)",
     )
     parser.add_argument(
         "--job-type",
@@ -671,7 +687,7 @@ def main(argv: list[str] | None = None) -> int:
         tenant = str(UUID(args.tenant or account["tenantId"]))
         with (
             AzureCliCredential(tenant_id=tenant) as credential,
-            httpx.Client(timeout=60, follow_redirects=False) as http,
+            create_http_client(tls12=args.tls12) as http,
         ):
             client = FabricClient(
                 http,

@@ -66,6 +66,37 @@ No publisher starts during provisioning. `status` reads resource inventory,
 local checkpoints, raw-event count, and latest capture time; it is not a complete
 health check for Eventstream, OneLake, mappings, or scheduled jobs.
 
+### WSL With An Approved Package Feed
+
+Stay in WSL and use an already installed Linux Python 3.11 or newer. From the
+repository root, configure the current Bash session before running `uv`:
+
+```bash
+python3 --version
+export UV_PYTHON="$(command -v python3)"
+export UV_PYTHON_DOWNLOADS=never
+export UV_DEFAULT_INDEX=https://packagefeedproxy.microsoft.io/pypi/simple
+
+uv run infra/fabric/deploy.py plan
+uv run infra/fabric/deploy.py status --workspace "<workspace-id>" --tenant "<tenant-id>" --tls12
+uv run infra/fabric/deploy.py apply --workspace "<workspace-id>" --tenant "<tenant-id>" --tls12
+```
+
+The feed replaces the default PyPI index; do not add public PyPI as a fallback.
+Any additional indexes configured in your environment must also be approved.
+The feed supplies Python packages, not the Python interpreter itself.
+`UV_PYTHON_DOWNLOADS=never` prevents automatic interpreter downloads. If no
+compatible Python is installed, obtain it through your organization's approved
+installation process. These settings do not change global machine configuration.
+
+Use `--tls12` for the WSL handshake issue reproduced with this KQL endpoint. It
+restricts the bootstrap's Fabric/KQL HTTP client to TLS 1.2 while retaining
+certificate and hostname verification. Without the flag, TLS negotiation remains
+unchanged. The flag does not configure `uv`, Azure CLI, or the OneLake SDK.
+KQL requests use the checkpoint's database item UUID, not its display name.
+Keep the existing checkpoint when resuming; `status` is read-only and requires an
+existing checkpoint, while `apply` provisions resources.
+
 [config.json](config.json) controls the prefix, canonical artifact directory,
 allowed presence types for twin history, and OneLake target latency. Paths are
 relative to the config file. `--config` selects another config. The default
@@ -143,7 +174,10 @@ OneLake target latency is a batching target, not an end-to-end refresh guarantee
    and preserves the top-level JSON fields. The versioned definition uses processed
    ingestion. The named KQL JSON mapping remains available for direct ingestion;
    it does not configure Eventstream field mapping by itself.
-3. Send events with the existing relay. For example, relay the completed jeep
+3. For continuous detection and publishing, use the
+   [Compose app](../../apps/detect/README.md#docker-compose) with its `fabric`
+   profile after privately configuring the Custom App connection string.
+   Alternatively, relay the completed jeep
    trial file after setting the private connection settings:
 
    ```bash
