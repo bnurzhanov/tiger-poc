@@ -203,8 +203,11 @@ OneLake target latency is a batching target, not an end-to-end refresh guarantee
    event timestamps and state. Configure recurring execution only after these
    one-time checks succeed.
 
-Dashboards remain the PR's design blueprints, not native dashboard import
-packages. Follow the [dashboard configuration guide](../../apps/fabric/README.md#configure-twin-and-dashboard-views).
+The [native dashboard template](../../apps/fabric/dashboards/fabric_realtime_dashboard.json)
+is portable and schema-validated, but the bootstrap does not deploy it. Upload it
+and configure its single shared KQL data source for your environment using the
+[dashboard import guide](../../apps/fabric/README.md#import-the-dashboard-template).
+Live import and query execution still require validation in your workspace.
 
 ## Optional Job API
 

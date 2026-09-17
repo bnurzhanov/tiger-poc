@@ -171,9 +171,58 @@ manual setup. They are not validated official Fabric import formats. Bind
 bind arbitrary raw events to occupancy or initialize an unobserved position empty.
 Null seed values mean unknown; omit those initial properties if the UI rejects null.
 
-The [dashboard JSON](dashboards/fabric_realtime_dashboard.json) is a tile/query
-blueprint, not a verified import package. Configure the tiles against your KQL
-database. [The Power BI M query](dashboards/powerbi_directquery_kql.m) uses the same
+The [dashboard JSON](dashboards/fabric_realtime_dashboard.json) is a reusable
+native version-82 dashboard template with seven tiles, not the earlier tile/query
+blueprint. It contains no deployment-specific endpoint, workspace, database, or
+dashboard identity. Its UUIDs identify only internal tiles, queries, pages, and
+the shared data source. The JSON has been validated against Microsoft's schema;
+live Fabric import, data-source editing, and query execution still require validation.
+
+#### Import The Dashboard Template
+
+1. Prepare your KQL database using the setup above. It must contain
+    `ProcessEventsRaw`, `ConfirmedPresenceEvents`, `CurrentPositionOccupancy`,
+    `Plants`, `Cells`, and `MonitoredPositions`. With the default bootstrap prefix,
+    use `tiger_events_db`, not the default `tiger_events` database.
+2. Create or open a Real-Time Dashboard in your own workspace and enter Editing
+    mode. For an existing dashboard, download a backup before replacing it.
+3. Select **Manage > Replace with file** and upload
+    [fabric_realtime_dashboard.json](dashboards/fabric_realtime_dashboard.json).
+4. Under **Manage > Data sources**, edit the existing **Configure Tiger KQL
+    Database** source. Replace `https://example.invalid` with your database's
+    **Query URI** and select your database. This is a manual Kusto connection;
+    it does not need a Fabric workspace ID or Eventstream connection string.
+    Keep this source rather than deleting it and creating a new one: all seven
+    queries reference its internal ID.
+5. Refresh and check all seven tiles, then select **Home > Save**. Confirm access
+    using your own Fabric identity and database permissions. You can then enable
+    a supported refresh interval, such as 10 seconds, under refresh settings.
+
+The placeholder host is deliberately non-resolving. Tiles cannot query data until
+you configure the source; they may initially show connection errors. Automatic
+refresh is disabled to avoid repeated requests before configuration.
+
+If the portal refuses an unconfigured source, prepare a local copy before upload:
+name it `tiger-dashboard.local.json` in the dashboards directory and replace only
+`dataSources[0].clusterUri` and `dataSources[0].database`. Use the Query URI and
+the database identifier accepted by that endpoint; a Fabric database's item ID
+can be used to disambiguate its name. Leave `dataSources[0].id` and the query
+references unchanged. Do not add credentials to the JSON.
+
+Local `*.local.json` files and `fabric-export.json` are gitignored because
+connected exports contain deployment identifiers. Keep the tracked template
+unconfigured. The bootstrap does not upload or bind this dashboard automatically.
+See Microsoft's [dashboard import and management guide](https://learn.microsoft.com/fabric/real-time-intelligence/dashboard-real-time-create).
+
+The four summary cards and position table show last-confirmed evidence across all
+time, not camera health. The time-range control filters transitions by capture
+time and latency by ingestion time. Transitions are limited to the latest 500
+deduplicated events in the selected range. Unknown positions are excluded from
+confirmed-state counts; an empty database yields a null occupancy rate, not 0%.
+
+#### Power BI Alternative
+
+[The Power BI M query](dashboards/powerbi_directquery_kql.m) uses the same
 view and reference joins. Connect using DirectQuery, select Transform Data, and
 replace the query in Power Query's Advanced Editor with the full M expression,
 updating its endpoint and database placeholders. Connector query fields accept
@@ -209,7 +258,8 @@ uv run --project apps/detect --extra fabric pytest apps/detect/tests/test_fabric
 ```
 
 Local tests cover canonical validation, publisher behavior, JSON mappings, manifest
-identity alignment, and query references. They do not execute KQL or validate
+identity alignment, native dashboard query references, and placeholder-only source
+configuration. They do not execute KQL or validate
 Fabric UI/import compatibility. Before live use, execute the setup and queries in
 a test database and confirm that non-presence events leave occupancy unchanged,
 both presence types update correctly, and replay does not duplicate timeline rows.
