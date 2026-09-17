@@ -68,10 +68,6 @@ services:
       - --checkpoint
       - /var/lib/tiger-publisher/delivery.json
       - --live-fabric
-    environment:
-      FABRIC_EVENTSTREAM_CONNECTION_STRING_FILE: /run/secrets/fabric_connection_string
-    secrets:
-      - fabric_connection_string
     volumes:
       - type: bind
         source: ../data
@@ -80,10 +76,6 @@ services:
         bind:
           create_host_path: false
       - publisher-state:/var/lib/tiger-publisher
-
-secrets:
-  fabric_connection_string:
-    file: ./secrets/fabric-connection-string
 
 volumes:
   publisher-state:

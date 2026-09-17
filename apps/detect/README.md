@@ -159,7 +159,7 @@ printf '\n'
 (umask 077; printf '%s' "$fabric_connection_string" > apps/secrets/fabric-connection-string)
 unset fabric_connection_string
 
-docker compose --env-file apps/.env -f apps/docker-compose.yml --profile fabric up --build -d
+docker compose --env-file apps/.env -f apps/docker-compose.yml -f apps/docker-compose.fabric.yml --profile fabric up --build -d
 ```
 
 The publisher reads the mounted secret file, waits for the detector's event file,
@@ -168,15 +168,14 @@ Follow mode retries publication availability failures up to five times, waiting
 1, 2, 4, 8, and 16 seconds. A successful poll resets the retry budget. Invalid
 records, changed inputs, and checkpoint errors stop immediately. Exhausted retries
 also stop the publisher; Compose does not automatically restart it. After fixing
-the cause, run `docker compose --profile fabric up -d publisher` from `apps`
-with the same UID/GID settings. You must also start the publisher explicitly after
-a Docker daemon restart.
+the cause, rerun the Fabric Compose command with the same UID/GID settings. You
+must also start the publisher explicitly after a Docker daemon restart.
 Only the publisher receives this secret. Compose secret files are local files,
 not an encrypted secret store. Never commit them or paste their contents into logs.
 
 ```bash
-docker compose --env-file apps/.env -f apps/docker-compose.yml --profile fabric logs -f detect publisher
-docker compose --env-file apps/.env -f apps/docker-compose.yml --profile fabric down
+docker compose --env-file apps/.env -f apps/docker-compose.yml -f apps/docker-compose.fabric.yml --profile fabric logs -f detect publisher
+docker compose --env-file apps/.env -f apps/docker-compose.yml -f apps/docker-compose.fabric.yml --profile fabric down
 ```
 
 The publisher's delivery checkpoint lives in the `publisher-state` named volume
