@@ -15,8 +15,10 @@ import hashlib
 import json
 import logging
 import re
+import ssl
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -103,11 +105,46 @@ class FabricClient:
         *,
         timeout: float = 1800,
         pause: Callable[[float], None] = time.sleep,
+        diagnostics_dir: Path | None = None,
     ) -> None:
         self.http = http
         self.token = token
         self.timeout = timeout
         self.pause = pause
+        self.diagnostics_dir = diagnostics_dir
+
+    def save_failure(self, response: httpx.Response, context: str) -> str:
+        """Optionally retain the service error privately, never request credentials."""
+        if self.diagnostics_dir is None:
+            return " Use --diagnostics-dir to retain the service error locally."
+        try:
+            body = response.json()
+        except ValueError:
+            body = response.text
+        try:
+            self.diagnostics_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                prefix="fabric-failure-",
+                suffix=".json",
+                dir=self.diagnostics_dir,
+                delete=False,
+            ) as diagnostic:
+                json.dump(
+                    {
+                        "context": context,
+                        "statusCode": response.status_code,
+                        "requestId": response.headers.get("request-id"),
+                        "response": body,
+                    },
+                    diagnostic,
+                    indent=2,
+                )
+                diagnostic.write("\n")
+            return f" Private service diagnostic: {diagnostic.name}. Review before sharing."
+        except OSError:
+            return " Could not save the private service diagnostic; check directory access."
 
     def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         """Call Fabric, retrying throttling but never ambiguous server errors."""
@@ -141,6 +178,7 @@ class FabricClient:
                 f"Fabric {method} {parsed.path} returned HTTP {response.status_code}; "
                 f"request ID: {response.headers.get('request-id', 'unavailable')}. "
                 "Inspect the item and permissions before retrying."
+                + self.save_failure(response, f"{method} {parsed.path}")
             )
         return response
 
@@ -200,6 +238,7 @@ class FabricClient:
                 )
                 raise DeploymentError(
                     f"Fabric operation {operation_url} ended with {status}.{detail}"
+                    + self.save_failure(response, operation_url)
                 )
             if status not in {"NotStarted", "Running"}:
                 raise DeploymentError(f"Unexpected operation status: {status!r}.")
@@ -313,10 +352,13 @@ class Deployment:
         }
         if parts is not None:
             payload["definition"] = encode_definition(parts)
-        response = self.client.request(
-            "POST", f"workspaces/{self.workspace}/{endpoint}", json=payload
-        )
-        item = self.client.finish(response, result=True)
+        try:
+            response = self.client.request(
+                "POST", f"workspaces/{self.workspace}/{endpoint}", json=payload
+            )
+            item = self.client.finish(response, result=True)
+        except DeploymentError as error:
+            raise DeploymentError(f"Create {name} ({kind}) failed. {error}") from error
         if not item.get("id"):
             raise DeploymentError(
                 f"Create {name} completed without an item ID; inspect the workspace before retrying."
@@ -353,7 +395,7 @@ class Deployment:
                 headers={
                     "Authorization": f"Bearer {self.client.token(endpoint + '/.default')}"
                 },
-                json={"db": database["displayName"], "csl": command},
+                json={"db": self.state["items"]["database"], "csl": command},
             )
         except (httpx.ConnectError, httpx.ConnectTimeout) as error:
             raise DeploymentError(
@@ -568,6 +610,16 @@ class Deployment:
             self.save()
 
 
+def create_http_client(*, tls12: bool = False) -> httpx.Client:
+    """Create a verified HTTP client with optional TLS 1.2 compatibility."""
+    verification: ssl.SSLContext | bool = True
+    if tls12:
+        verification = ssl.create_default_context()
+        verification.minimum_version = ssl.TLSVersion.TLSv1_2
+        verification.maximum_version = ssl.TLSVersion.TLSv1_2
+    return httpx.Client(verify=verification, timeout=60, follow_redirects=False)
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Build the deployment CLI without authenticating."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -590,6 +642,16 @@ def create_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--timeout", type=int, default=1800, help="Maximum seconds per async operation"
+    )
+    parser.add_argument(
+        "--tls12",
+        action="store_true",
+        help="Use verified TLS 1.2 for Fabric/KQL HTTP calls (network compatibility)",
+    )
+    parser.add_argument(
+        "--diagnostics-dir",
+        type=Path,
+        help="Save Fabric failure responses in private files; may contain sensitive service details",
     )
     parser.add_argument(
         "--job-type",
@@ -671,12 +733,13 @@ def main(argv: list[str] | None = None) -> int:
         tenant = str(UUID(args.tenant or account["tenantId"]))
         with (
             AzureCliCredential(tenant_id=tenant) as credential,
-            httpx.Client(timeout=60, follow_redirects=False) as http,
+            create_http_client(tls12=args.tls12) as http,
         ):
             client = FabricClient(
                 http,
                 lambda scope: credential.get_token(scope).token,
                 timeout=args.timeout,
+                diagnostics_dir=args.diagnostics_dir,
             )
             deployment = Deployment(client, config, workspace, state)
             if args.command == "run":

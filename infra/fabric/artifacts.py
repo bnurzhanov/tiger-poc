@@ -176,6 +176,7 @@ def deployment_model(config: dict) -> dict:
                 if prop["name"] in updates
             }
             rendered["timeseries"]["eventId"] = ["eventId", "String"]
+            rendered["timeseries"]["Timestamp"] = ["capturedAt", "DateTime"]
             rendered["linkProperty"] = binding["entityPrimaryKey"]
         entities.append(rendered)
     by_name = {entity["name"]: entity for entity in entities}
@@ -272,14 +273,6 @@ def twin_definition(
                     "timeseries" if timeseries else "properties"
                 ].items()
             ]
-            if timeseries:
-                mappings.insert(
-                    0,
-                    {
-                        "SourceColumn": "capturedAt",
-                        "EntityTypePropertyName": "Timestamp",
-                    },
-                )
             parts[f"MappingOperations/{operation}.json"] = {
                 "OperationId": operation,
                 "DisplayName": name,

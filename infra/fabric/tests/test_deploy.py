@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import re
+import ssl
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
@@ -21,6 +22,8 @@ from infra.fabric.deploy import (
     Deployment,
     DeploymentError,
     FabricClient,
+    create_http_client,
+    create_parser,
     encode_definition,
     main,
 )
@@ -270,6 +273,121 @@ def test_given_service_error_when_operation_fails_then_code_is_reported_without_
     assert "private payload" not in str(failure.value)
 
 
+def test_given_failed_twin_import_when_created_then_item_context_is_reported(
+    tmp_path: Path,
+) -> None:
+    client = make_client(
+        [
+            httpx.Response(
+                202,
+                headers={"x-ms-operation-id": "00000000-0000-4000-8000-000000000010"},
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "status": "Failed",
+                    "error": {"errorCode": "ALMOperationImportFailed"},
+                },
+            ),
+        ]
+    )
+    deployment = Deployment(
+        client,
+        load_config(ROOT / "infra/fabric/config.json"),
+        "00000000-0000-4000-8000-000000000001",
+        tmp_path / "state.json",
+    )
+
+    with pytest.raises(
+        DeploymentError, match=r"Create tiger_twin \(DigitalTwinBuilder\) failed"
+    ):
+        deployment.create("twin", {"definition.json": {"LakehouseId": "backing"}})
+
+    assert deployment.state["items"] == {}
+    assert not deployment.state_path.exists()
+
+
+@pytest.mark.parametrize("status_code", [200, 400])
+def test_given_diagnostics_when_service_fails_then_details_are_private(
+    tmp_path: Path, status_code: int, caplog
+) -> None:
+    body = {
+        "status": "Failed",
+        "error": {
+            "errorCode": "ALMOperationImportFailed",
+            "message": "private import details",
+            "moreDetails": [{"errorCode": "InnerError", "message": "private detail"}],
+        },
+    }
+    diagnostics = tmp_path / "diagnostics"
+    client = FabricClient(
+        httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(status_code, json=body)
+            )
+        ),
+        lambda scope: "credential-not-for-diagnostics",
+        pause=lambda seconds: None,
+        diagnostics_dir=diagnostics,
+    )
+
+    with pytest.raises(DeploymentError) as failure:
+        if status_code == 400:
+            client.request("POST", "workspaces/test/digitalTwinBuilders", json={})
+        else:
+            client.finish(
+                httpx.Response(
+                    202,
+                    headers={
+                        "x-ms-operation-id": "00000000-0000-4000-8000-000000000010"
+                    },
+                )
+            )
+
+    files = list(diagnostics.glob("*.json"))
+    assert len(files) == 1
+    assert files[0].stat().st_mode & 0o777 == 0o600
+    content = files[0].read_text()
+    assert json.loads(content)["response"] == body
+    assert "credential-not-for-diagnostics" not in content
+    assert "private import details" not in str(failure.value) + caplog.text
+    assert str(files[0]) in str(failure.value)
+
+
+def test_given_unwritable_diagnostics_when_import_fails_then_original_error_survives(
+    tmp_path: Path,
+) -> None:
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("existing file")
+    client = FabricClient(
+        httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    json={
+                        "status": "Failed",
+                        "error": {"errorCode": "ALMOperationImportFailed"},
+                    },
+                )
+            )
+        ),
+        lambda scope: "token",
+        pause=lambda seconds: None,
+        diagnostics_dir=blocked,
+    )
+
+    with pytest.raises(DeploymentError, match="ALMOperationImportFailed") as failure:
+        client.finish(
+            httpx.Response(
+                202,
+                headers={"x-ms-operation-id": "00000000-0000-4000-8000-000000000010"},
+            )
+        )
+
+    assert "Could not save" in str(failure.value)
+    assert blocked.read_text() == "existing file"
+
+
 @pytest.mark.parametrize(
     "url",
     ["https://example.com/token", "http://api.fabric.microsoft.com/v1/operations/one"],
@@ -348,6 +466,31 @@ def test_given_model_when_rendered_then_links_and_flow_groups_are_consistent() -
         "EntityTypePropertyName": "Timestamp",
     } in timeseries["MappingOperationProperties"]["MappedProperties"]
     assert parts == twin_definition(config, "workspace", "source", "backing")[0]
+
+
+def test_given_timeseries_mapping_when_rendered_then_all_targets_are_declared() -> None:
+    config = load_config(ROOT / "infra/fabric/config.json")
+    parts, _ = twin_definition(config, "workspace", "source", "backing")
+    mapping = next(
+        part
+        for path, part in parts.items()
+        if path.startswith("MappingOperations/")
+        and part["MappingOperationProperties"]["MappingType"] == "TimeSeries"
+    )
+    entity = parts[f"EntityTypes/{mapping['EntityTypeId']}.json"]
+    properties = {
+        prop["Name"]: prop["ValueType"] for prop in entity["TimeseriesProperties"]
+    }
+    targets = mapping["MappingOperationProperties"]["MappedProperties"]
+
+    assert properties["Timestamp"] == "DateTime"
+    assert all(target["EntityTypePropertyName"] in properties for target in targets)
+    assert (
+        targets.count(
+            {"SourceColumn": "capturedAt", "EntityTypePropertyName": "Timestamp"}
+        )
+        == 1
+    )
 
 
 def test_given_plan_when_run_then_no_authentication_is_needed(capsys) -> None:
@@ -512,6 +655,71 @@ def test_given_empty_workspace_when_applied_twice_then_second_run_creates_nothin
         == deployment.state["items"]["database"]
     )
     assert topology["destinations"][0]["properties"]["tableName"] == "ProcessEventsRaw"
+
+
+@pytest.mark.parametrize("query", [False, True])
+def test_given_database_display_name_when_kql_sent_then_item_id_is_used(
+    tmp_path, query
+) -> None:
+    database_id = "00000000-0000-4000-8000-000000000002"
+    requests = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "displayName": "tiger_events_db",
+                    "properties": {
+                        "queryServiceUri": "https://test.kusto.fabric.microsoft.com"
+                    },
+                },
+            )
+        return httpx.Response(200, json={"Tables": []})
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http:
+        deployment = Deployment(
+            FabricClient(http, lambda scope: "test-token"),
+            load_config(ROOT / "infra/fabric/config.json"),
+            "00000000-0000-4000-8000-000000000001",
+            tmp_path / "state.json",
+        )
+        deployment.state["items"]["database"] = database_id
+
+        deployment.kql("print value=1" if query else ".show tables", query=query)
+
+    assert requests[0].url.path.endswith(f"/kqlDatabases/{database_id}")
+    assert requests[1].url.path == ("/v1/rest/query" if query else "/v1/rest/mgmt")
+    assert json.loads(requests[1].content)["db"] == database_id
+
+
+@pytest.mark.parametrize("tls12", [False, True])
+def test_given_tls_option_when_client_created_then_certificate_checks_remain_enabled(
+    monkeypatch, tls12
+) -> None:
+    options = {}
+    sentinel = object()
+
+    def capture_client(**kwargs):
+        options.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(httpx, "Client", capture_client)
+    args = create_parser().parse_args(["status", *(["--tls12"] if tls12 else [])])
+
+    assert create_http_client(tls12=args.tls12) is sentinel
+    assert options["follow_redirects"] is False
+    if tls12:
+        context = options["verify"]
+        assert isinstance(context, ssl.SSLContext)
+        assert (
+            context.minimum_version == context.maximum_version == ssl.TLSVersion.TLSv1_2
+        )
+        assert context.verify_mode == ssl.CERT_REQUIRED
+        assert context.check_hostname is True
+    else:
+        assert options["verify"] is True
 
 
 @pytest.mark.parametrize("connection_error", [httpx.ConnectError, httpx.ConnectTimeout])

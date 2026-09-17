@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
+import hashlib
 import json
 import logging
 import math
 import os
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 from uuid import uuid4
 
 from .contracts import ProcessEvent
@@ -46,6 +48,12 @@ class FabricEventstreamSink:
         self.eventhub_name = eventhub_name or os.getenv("FABRIC_EVENTSTREAM_EVENTHUB_NAME")
         self.namespace = namespace or os.getenv("FABRIC_EVENTSTREAM_NAMESPACE")
         self.dry_run = dry_run or os.getenv("MOCK_FABRIC", "").lower() in {"1", "true", "yes"}
+        secret_file = os.getenv("FABRIC_EVENTSTREAM_CONNECTION_STRING_FILE")
+        if not self.dry_run and not self.namespace and not self.connection_string and secret_file:
+            try:
+                self.connection_string = Path(secret_file).read_text(encoding="utf-8").strip()
+            except (OSError, UnicodeError):
+                raise SinkError("Cannot read the Fabric connection string secret file.") from None
         if not self.dry_run:
             if not (self.namespace or self.connection_string):
                 raise SinkError("Live publishing requires an Event Hubs destination; use --dry-run offline.")
@@ -168,11 +176,132 @@ def read_events(paths: Iterable[Path]) -> Iterable[dict[str, Any]]:
             raise SinkError("Invalid UTF-8 JSONL input; verify the file encoding before retrying.") from error
 
 
+class JsonlFollower:
+    """Relay append-only JSONL with acknowledged offsets and a single checkpoint owner."""
+
+    MAX_LINE_BYTES = 1024 * 1024
+
+    def __init__(self, paths: Iterable[Path], checkpoint: Path, *, dry_run: bool) -> None:
+        self.paths = [path.resolve() for path in paths]
+        self.checkpoint = checkpoint.resolve()
+        self.expected = {
+            "version": 2, "inputs": [str(path) for path in self.paths],
+            "mode": "dry-run" if dry_run else "live",
+        }
+        self.state: dict[str, Any] = {**self.expected, "positions": {}}
+        self._lock: Any = None
+
+    def __enter__(self) -> Self:
+        """Lock delivery state before loading it; never share a checkpoint."""
+        self.checkpoint.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = self.checkpoint.with_suffix(self.checkpoint.suffix + ".lock").open("a")
+        try:
+            fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if self.checkpoint.exists():
+                self.state = json.loads(self.checkpoint.read_text(encoding="utf-8"))
+                if (not isinstance(self.state, dict)
+                        or any(self.state.get(key) != value for key, value in self.expected.items())
+                        or not isinstance(self.state.get("positions"), dict)
+                        or any(key not in self.expected["inputs"] for key in self.state["positions"])):
+                    raise SinkError("Delivery checkpoint does not match inputs or publication mode.")
+                for position in self.state["positions"].values():
+                    if (not isinstance(position, dict)
+                            or type(position.get("offset")) is not int or position["offset"] < 0
+                            or type(position.get("inode")) is not int
+                            or not isinstance(position.get("prefixHash"), str)):
+                        raise SinkError("Invalid delivery checkpoint position.")
+        except (OSError, ValueError, TypeError):
+            self._lock.close()
+            self._lock = None
+            raise SinkError("Cannot acquire or load delivery checkpoint; check ownership and state.") from None
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        """Release the exclusive delivery lock on shutdown or failure."""
+        if self._lock is not None:
+            self._lock.close()
+            self._lock = None
+
+    @staticmethod
+    def _prefix_hash(handle: Any, offset: int) -> Any:
+        handle.seek(0)
+        digest = hashlib.sha256()
+        remaining = offset
+        while remaining:
+            chunk = handle.read(min(remaining, 1024 * 1024))
+            if not chunk:
+                raise SinkError("A followed input was replaced or truncated; reconcile its checkpoint before retrying.")
+            digest.update(chunk)
+            remaining -= len(chunk)
+        return digest
+
+    def _save(self) -> None:
+        temporary = self.checkpoint.with_suffix(self.checkpoint.suffix + ".tmp")
+        with temporary.open("w", encoding="utf-8") as handle:
+            json.dump(self.state, handle)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.replace(self.checkpoint)
+        directory = os.open(self.checkpoint.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+
+    def poll_once(self, publish: Callable[[dict[str, Any]], Any]) -> int:
+        """Publish at most 100 complete records per input; save only acknowledged offsets."""
+        if self._lock is None:
+            raise SinkError("Acquire the delivery checkpoint before following inputs.")
+        published = 0
+        for path in self.paths:
+            position = self.state["positions"].get(str(path))
+            try:
+                handle = path.open("rb")
+            except FileNotFoundError:
+                if position is not None:
+                    raise SinkError("A followed input disappeared; retain its file and checkpoint.") from None
+                continue
+            with handle:
+                info = os.fstat(handle.fileno())
+                offset = position["offset"] if position else 0
+                if position and (
+                    info.st_ino != position["inode"] or info.st_size < offset
+                ):
+                    raise SinkError("A followed input was replaced or truncated; reconcile its checkpoint before retrying.")
+                digest = self._prefix_hash(handle, offset)
+                if position and digest.hexdigest() != position["prefixHash"]:
+                    raise SinkError("A followed input was replaced or truncated; reconcile its checkpoint before retrying.")
+                handle.seek(offset)
+                for _record in range(100):
+                    line = handle.readline(self.MAX_LINE_BYTES + 1)
+                    if len(line) > self.MAX_LINE_BYTES:
+                        raise SinkError("Followed input exceeds the 1 MiB record limit.")
+                    if not line.endswith(b"\n"):
+                        break
+                    if line.strip():
+                        try:
+                            event = validate_process_event(json.loads(line.decode("utf-8")))
+                        except (ValueError, TypeError):
+                            raise SinkError("Invalid ProcessEvent in followed input; checkpoint retained.") from None
+                        if publish(event) is False:
+                            raise SinkUnavailableError("Publication was not acknowledged; checkpoint retained.")
+                        published += 1
+                    offset = handle.tell()
+                    digest.update(line)
+                    self.state["positions"][str(path)] = {
+                        "offset": offset, "inode": info.st_ino,
+                        "prefixHash": digest.hexdigest(),
+                    }
+                    self._save()
+        return published
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create the offline-first relay and demo CLI."""
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--input", type=Path, nargs="+", help="Completed detect JSONL files.")
+    source.add_argument("--input", type=Path, nargs="+", help="Detect JSONL files (append-only with --follow).")
     source.add_argument("--demo", action="store_true", help="Generate six multi-cell transitions.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--live-fabric", action="store_true", help="Publish to the configured endpoint.")
@@ -180,6 +309,9 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path, help="Optional sanitized local audit trace.")
     parser.add_argument("--interval", type=float, default=0.0, help="Seconds between publications.")
     parser.add_argument("--iterations", type=int, default=1, help="Number of demo cycles.")
+    parser.add_argument("--follow", action="store_true", help="Continuously publish complete appended records.")
+    parser.add_argument("--checkpoint", type=Path, help="Required durable delivery state for --follow.")
+    parser.add_argument("--poll-interval", type=float, default=0.25, help="Seconds between follow polls.")
     return parser
 
 
@@ -191,12 +323,29 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("interval must be finite and nonnegative; iterations must be positive")
     if args.input and args.iterations != 1:
         parser.error("--iterations is only supported with --demo")
+    if args.follow and (not args.input or not args.checkpoint or args.interval):
+        parser.error("--follow requires --input and --checkpoint; use --poll-interval instead of --interval")
+    if args.checkpoint and not args.follow:
+        parser.error("--checkpoint requires --follow")
+    if not math.isfinite(args.poll_interval) or args.poll_interval <= 0:
+        parser.error("--poll-interval must be finite and positive")
     if args.output and args.input and any(
         args.output.resolve() == path.resolve() or (
             args.output.exists() and path.exists() and args.output.samefile(path)
         ) for path in args.input
     ):
         parser.error("audit output must differ from every input file")
+    if args.follow:
+        paths = [*args.input, args.checkpoint,
+                 args.checkpoint.with_suffix(args.checkpoint.suffix + ".lock"),
+                 args.checkpoint.with_suffix(args.checkpoint.suffix + ".tmp")]
+        if args.output:
+            paths.append(args.output)
+        for index, path in enumerate(paths):
+            if any(path.resolve() == other.resolve() or (
+                path.exists() and other.exists() and path.samefile(other)
+            ) for other in paths[index + 1:]):
+                parser.error("inputs, audit output, checkpoint and checkpoint sidecars must be separate files")
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     sink = None
@@ -205,6 +354,25 @@ def main(argv: list[str] | None = None) -> int:
         sink = FabricEventstreamSink(
             dry_run=not args.live_fabric, fallback_jsonl_path=args.output
         )
+        if args.follow:
+            with JsonlFollower(args.input, args.checkpoint, dry_run=sink.dry_run) as follower:
+                logger.info("Following %d append-only event file(s)", len(args.input))
+                retries = 0
+                while True:
+                    try:
+                        count = follower.poll_once(sink.publish)
+                    except SinkUnavailableError:
+                        if retries >= 5:
+                            raise
+                        delay = 2 ** retries
+                        retries += 1
+                        logger.warning("Publication unavailable; retry %d/5 in %d seconds", retries, delay)
+                        time.sleep(delay)
+                        continue
+                    retries = 0
+                    if count:
+                        logger.info("%s %d events", "Validated" if sink.dry_run else "Published", count)
+                    time.sleep(args.poll_interval)
         published = 0
         demo_start = datetime.now(UTC) - timedelta(seconds=29 * args.iterations - 1)
         for iteration in range(args.iterations):

@@ -1,4 +1,4 @@
-"""Serve a loopback-only two-cell recording view from local workload artifacts."""
+"""Serve a localhost-by-default recording view from local workload artifacts."""
 
 from __future__ import annotations
 
@@ -44,8 +44,10 @@ def cell_status(workload: Workload, *, now: datetime | None = None) -> dict:
     return status
 
 
-def create_server(workloads: list[Workload], port: int) -> ThreadingHTTPServer:
+def create_server(workloads: list[Workload], port: int, *, host: str = "127.0.0.1") -> ThreadingHTTPServer:
     """Expose only the viewer, redacted status, and configured preview images."""
+    if host not in {"127.0.0.1", "0.0.0.0"}:
+        raise ValueError("Select loopback or the explicit container bind address")
     if not workloads or len(workloads) > 2:
         raise ValueError("Select one or two manifests")
     for values in (
@@ -95,7 +97,7 @@ def create_server(workloads: list[Workload], port: int) -> ThreadingHTTPServer:
         def log_message(self, format: str, *args: object) -> None:
             return
 
-    return ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    return ThreadingHTTPServer((host, port), Handler)
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -103,6 +105,8 @@ def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Read-only local camera workload view")
     parser.add_argument("--manifest", type=Path, action="append", required=True)
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--host", choices=["127.0.0.1", "0.0.0.0"], default="127.0.0.1",
+                        help="Use 0.0.0.0 only inside a container with a localhost-published port.")
     return parser
 
 
@@ -111,7 +115,7 @@ def main() -> int:
     args = create_parser().parse_args()
     try:
         workloads = [load_workload(path) for path in args.manifest]
-        with create_server(workloads, args.port) as server:
+        with create_server(workloads, args.port, host=args.host) as server:
             print(f"Recording view: http://127.0.0.1:{server.server_port}", flush=True)
             server.serve_forever()
     except KeyboardInterrupt:

@@ -24,8 +24,10 @@ an alternative transport, not a prerequisite for this Custom App source setup.
 The bootstrap does not create a second publisher or use the standalone jeep CSV.
 
 > [!IMPORTANT]
-> This implementation has offline tests, not a successful live Fabric deployment.
-> Public preview definitions are available, but a supported
+> Definition deployment and twin definition read-back have been verified live.
+> The twin was validated through staged create/update imports; a fresh, single-request
+> import of the corrected definition has not yet been exercised. End-to-end event
+> ingestion and mapping execution remain unverified. A supported
 > `DigitalTwinBuilderFlow` job type has not been established. `apply` creates
 > definitions and reference data; it does not initialize twin instances or run
 > mappings. Eventstream connection details and flow execution still require
@@ -65,6 +67,37 @@ It validates local artifacts and prints item names and a deployment fingerprint.
 No publisher starts during provisioning. `status` reads resource inventory,
 local checkpoints, raw-event count, and latest capture time; it is not a complete
 health check for Eventstream, OneLake, mappings, or scheduled jobs.
+
+### WSL With An Approved Package Feed
+
+Stay in WSL and use an already installed Linux Python 3.11 or newer. From the
+repository root, configure the current Bash session before running `uv`:
+
+```bash
+python3 --version
+export UV_PYTHON="$(command -v python3)"
+export UV_PYTHON_DOWNLOADS=never
+export UV_DEFAULT_INDEX=https://packagefeedproxy.microsoft.io/pypi/simple
+
+uv run infra/fabric/deploy.py plan
+uv run infra/fabric/deploy.py status --workspace "<workspace-id>" --tenant "<tenant-id>" --tls12
+uv run infra/fabric/deploy.py apply --workspace "<workspace-id>" --tenant "<tenant-id>" --tls12
+```
+
+The feed replaces the default PyPI index; do not add public PyPI as a fallback.
+Any additional indexes configured in your environment must also be approved.
+The feed supplies Python packages, not the Python interpreter itself.
+`UV_PYTHON_DOWNLOADS=never` prevents automatic interpreter downloads. If no
+compatible Python is installed, obtain it through your organization's approved
+installation process. These settings do not change global machine configuration.
+
+Use `--tls12` for the WSL handshake issue reproduced with this KQL endpoint. It
+restricts the bootstrap's Fabric/KQL HTTP client to TLS 1.2 while retaining
+certificate and hostname verification. Without the flag, TLS negotiation remains
+unchanged. The flag does not configure `uv`, Azure CLI, or the OneLake SDK.
+KQL requests use the checkpoint's database item UUID, not its display name.
+Keep the existing checkpoint when resuming; `status` is read-only and requires an
+existing checkpoint, while `apply` provisions resources.
 
 [config.json](config.json) controls the prefix, canonical artifact directory,
 allowed presence types for twin history, and OneLake target latency. Paths are
@@ -118,7 +151,8 @@ is replaced. Reference metadata stays aligned with the shipped instance JSON.
 The renderer converts the design reference into public Fabric definition parts.
 It adds `plantId` to Cell and `cellId` to MonitoredPosition for hierarchy joins.
 Static identities use the existing stable IDs. Time series link `subjectId` to
-`positionId`, map `capturedAt` to `Timestamp`, and retain `eventId`, occupancy,
+`positionId`, explicitly declare `Timestamp` as a DateTime time-series property,
+map `capturedAt` to it, and retain `eventId`, occupancy,
 confidence, observation type, and last-observed timestamp. Unobserved occupancy
 is omitted, not initialized to false.
 
@@ -143,7 +177,10 @@ OneLake target latency is a batching target, not an end-to-end refresh guarantee
    and preserves the top-level JSON fields. The versioned definition uses processed
    ingestion. The named KQL JSON mapping remains available for direct ingestion;
    it does not configure Eventstream field mapping by itself.
-3. Send events with the existing relay. For example, relay the completed jeep
+3. For continuous detection and publishing, use the
+   [Compose app](../../apps/detect/README.md#docker-compose) with its `fabric`
+   profile after privately configuring the Custom App connection string.
+   Alternatively, relay the completed jeep
    trial file after setting the private connection settings:
 
    ```bash
@@ -166,8 +203,11 @@ OneLake target latency is a batching target, not an end-to-end refresh guarantee
    event timestamps and state. Configure recurring execution only after these
    one-time checks succeed.
 
-Dashboards remain the PR's design blueprints, not native dashboard import
-packages. Follow the [dashboard configuration guide](../../apps/fabric/README.md#configure-twin-and-dashboard-views).
+The [native dashboard template](../../apps/fabric/dashboards/fabric_realtime_dashboard.json)
+is portable and schema-validated, but the bootstrap does not deploy it. Upload it
+and configure its single shared KQL data source for your environment using the
+[dashboard import guide](../../apps/fabric/README.md#import-the-dashboard-template).
+Live import and query execution still require validation in your workspace.
 
 ## Optional Job API
 
@@ -213,6 +253,48 @@ If creation times out or the connection fails before an item ID is recorded, the
 service may still finish. Inspect Fabric before retrying; a name collision then
 stops automatic duplicate creation. Diagnose partial resources or remove the
 failed item manually before resuming. Do not discard state to bypass a collision.
+
+### Import Failure Diagnostics
+
+For a failed import, capture the service response on an explicitly requested
+attempt. Keep the existing checkpoint and use the same deployment arguments:
+
+```bash
+uv run infra/fabric/deploy.py apply --workspace "<workspace-id>" --tls12 \
+   --diagnostics-dir data/fabric/diagnostics
+```
+
+This is an `apply`, not a read-only diagnostic command. It can create any remaining
+items if the import succeeds. Check the workspace for partially created items
+before retrying. Do not repeatedly retry an unchanged definition when the service
+reports `isRetriable: false`.
+
+The optional directory receives uniquely named, owner-only files (mode `0600` on
+Linux) for failed Fabric HTTP requests and asynchronous operations. Files retain
+the service response, including nested error details, but exclude request bodies
+and authentication headers. Service messages can contain sensitive information;
+review locally before sharing and keep diagnostics out of source control. Normal
+terminal output remains sanitized. This option does not change the deployment
+fingerprint or capture KQL and OneLake SDK failures.
+
+`ALMOperationImportFailed` alone does not identify a malformed field. For example,
+the service may report only that importing a `MappingOperation` failed. Preserve
+the operation ID and diagnostic for further isolation or Fabric support rather
+than deleting completed resources or changing preview enums without evidence.
+
+The time-series import previously failed because its mapping referenced
+`Timestamp` without declaring that property in the entity definition. Staged live
+tests isolated the failure to that mapping; explicitly declaring the DateTime
+property allowed it to import. The complete 12-part definition was read back and
+verified before the existing checkpoint was reconciled and the remaining three
+flow definitions were created. No event data was inserted and no mapping jobs ran.
+
+Fabric normalizes entity property IDs and adds inherited properties during import.
+Diagnostic updates must preserve the returned entity definitions; resubmitting
+the original generated property IDs caused an `EntityType` import failure during
+isolation. The bootstrap does not update definitions of already recorded items.
+Changing rendered definitions changes the fingerprint. Do not bypass that check:
+reconcile only verified, code-created resources after proving which inputs changed.
 
 For a new model version, manually clean up the previous deployment and archive
 its state, or use a separate prefix with a separate `--state` file. Remove twin

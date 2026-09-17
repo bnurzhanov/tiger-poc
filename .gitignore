@@ -4,5 +4,8 @@
 data/
 models/
 .env
+apps/secrets/
+apps/fabric/dashboards/fabric-export.json
+apps/fabric/dashboards/*.local.json
 **/.ruff_cache/*
 *.bak

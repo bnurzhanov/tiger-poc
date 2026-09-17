@@ -48,8 +48,8 @@ def test_given_occupancy_queries_when_no_positions_then_rate_is_unknown() -> Non
     samples = (FABRIC / "kql/03_sample_queries.kql").read_text()
 
     rate_query = next(
-        tile["query"] for tile in dashboard["tiles"]
-        if tile["id"] == "tile-occupancy-rate"
+        query["text"] for query in dashboard["queries"]
+        if "project Rate" in query["text"]
     )
     sample_query = samples.split("// Query 2:", 1)[1].split("// Query 3:", 1)[0]
     guarded_rate = (
@@ -128,7 +128,7 @@ def test_given_twin_binding_when_read_then_only_confirmed_latest_state_is_used()
 def test_given_dashboard_when_read_then_queries_use_current_contract() -> None:
     """Prevent legacy table names and invented ingestion timestamps from returning."""
     dashboard = json.loads((FABRIC / "dashboards/fabric_realtime_dashboard.json").read_text())
-    queries = "\n".join(tile["query"] for tile in dashboard["tiles"])
+    queries = "\n".join(query["text"] for query in dashboard["queries"])
     queries += (FABRIC / "dashboards/powerbi_directquery_kql.m").read_text()
     queries += (FABRIC / "kql/03_sample_queries.kql").read_text()
 
@@ -136,5 +136,31 @@ def test_given_dashboard_when_read_then_queries_use_current_contract() -> None:
     assert "palletPositionId" not in queries
     assert "ingestionTime" not in queries
     assert "ingestion_time()" in queries
-    status_tile = next(tile for tile in dashboard["tiles"] if tile["id"] == "tile-cell-status-table")
-    assert "join kind=inner Plants on plantId" in status_tile["query"]
+    status_tile = next(tile for tile in dashboard["tiles"] if tile["title"] == "Last Confirmed Position State")
+    status_query = next(query for query in dashboard["queries"] if query["id"] == status_tile["queryRef"]["queryId"])
+    assert "join kind=inner Plants on plantId" in status_query["text"]
+
+
+def test_given_dashboard_template_when_shared_then_connection_is_unconfigured() -> None:
+    dashboard = json.loads((FABRIC / "dashboards/fabric_realtime_dashboard.json").read_text())
+
+    assert "id" not in dashboard and "eTag" not in dashboard
+    assert dashboard["schema_version"] == 82
+    assert dashboard["autoRefresh"] == {"enabled": False}
+    assert len(dashboard["dataSources"]) == 1
+    source = dashboard["dataSources"][0]
+    assert source == {
+        "id": "50be4fa0-851c-4631-9896-000000000003",
+        "name": "Configure Tiger KQL Database", "kind": "manual-kusto",
+        "clusterUri": "https://example.invalid", "database": "REPLACE_WITH_KQL_DATABASE",
+    }
+    queries = {query["id"]: query for query in dashboard["queries"]}
+    assert len(queries) == len(dashboard["queries"]) == len(dashboard["tiles"]) == 7
+    assert len({tile["id"] for tile in dashboard["tiles"]}) == 7
+    for tile in dashboard["tiles"]:
+        assert tile["pageId"] in {page["id"] for page in dashboard["pages"]}
+        query = queries[tile["queryRef"]["queryId"]]
+        assert query["dataSource"] == {"kind": "inline", "dataSourceId": source["id"]}
+        assert query["usedVariables"] == [
+            name for name in ("_startTime", "_endTime") if name in query["text"]
+        ]

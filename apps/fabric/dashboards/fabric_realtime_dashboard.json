@@ -1,64 +1,139 @@
 {
-  "title": "Factory Equipment Perception & Digital Twin Real-Time Dashboard",
-  "version": "1.0",
-  "autoRefreshInterval": "5s",
-  "description": "Last confirmed object and pallet presence from detect ProcessEvents; event silence is not a camera health signal",
+  "$schema": "https://dataexplorer.azure.com/static/d/schema/82/dashboard.json",
+  "title": "Tiger Position Overview",
+  "schema_version": 82,
+  "autoRefresh": { "enabled": false },
   "tiles": [
     {
-      "id": "tile-total-positions",
+      "id": "ce3a3a70-a6a9-4a40-bd72-000000000001",
       "title": "Positions with Confirmed State",
-      "visualType": "stat",
-      "query": "CurrentPositionOccupancy | count",
-      "size": { "width": 3, "height": 2 },
-      "position": { "row": 0, "col": 0 }
+      "visualType": "card",
+      "queryRef": { "kind": "query", "queryId": "f36c8264-f362-47e9-9954-000000000001" },
+      "pageId": "50be4fa0-851c-4631-9896-000000000001",
+      "layout": { "x": 0, "y": 0, "width": 3, "height": 3 },
+      "visualOptions": { "multiStat__valueColumn": "Positions", "multiStat__textSize": "small" }
     },
     {
-      "id": "tile-occupied-count",
-      "title": "Currently Occupied",
-      "visualType": "stat",
-      "query": "CurrentPositionOccupancy | where isOccupied == true | count",
-      "size": { "width": 3, "height": 2 },
-      "position": { "row": 0, "col": 3 }
+      "id": "ce3a3a70-a6a9-4a40-bd72-000000000002",
+      "title": "Last Confirmed Occupied",
+      "visualType": "card",
+      "queryRef": { "kind": "query", "queryId": "f36c8264-f362-47e9-9954-000000000002" },
+      "pageId": "50be4fa0-851c-4631-9896-000000000001",
+      "layout": { "x": 3, "y": 0, "width": 3, "height": 3 },
+      "visualOptions": { "multiStat__valueColumn": "Occupied", "multiStat__textSize": "small" }
     },
     {
-      "id": "tile-empty-count",
-      "title": "Currently Empty",
-      "visualType": "stat",
-      "query": "CurrentPositionOccupancy | where isOccupied == false | count",
-      "size": { "width": 3, "height": 2 },
-      "position": { "row": 0, "col": 6 }
+      "id": "ce3a3a70-a6a9-4a40-bd72-000000000003",
+      "title": "Last Confirmed Empty",
+      "visualType": "card",
+      "queryRef": { "kind": "query", "queryId": "f36c8264-f362-47e9-9954-000000000003" },
+      "pageId": "50be4fa0-851c-4631-9896-000000000001",
+      "layout": { "x": 6, "y": 0, "width": 3, "height": 3 },
+      "visualOptions": { "multiStat__valueColumn": "Empty", "multiStat__textSize": "small" }
     },
     {
-      "id": "tile-occupancy-rate",
-      "title": "Occupancy Rate (%)",
-      "visualType": "stat",
-      "query": "CurrentPositionOccupancy | summarize TotalPositions = count(), OccupiedCount = countif(isOccupied == true) | project Rate = iff(TotalPositions == 0, real(null), round(100.0 * OccupiedCount / TotalPositions, 1))",
-      "size": { "width": 3, "height": 2 },
-      "position": { "row": 0, "col": 9 }
+      "id": "ce3a3a70-a6a9-4a40-bd72-000000000004",
+      "title": "Occupied Share of Confirmed Positions (%)",
+      "visualType": "card",
+      "queryRef": { "kind": "query", "queryId": "f36c8264-f362-47e9-9954-000000000004" },
+      "pageId": "50be4fa0-851c-4631-9896-000000000001",
+      "layout": { "x": 9, "y": 0, "width": 3, "height": 3 },
+      "visualOptions": { "multiStat__valueColumn": "Rate", "multiStat__textSize": "small" }
     },
     {
-      "id": "tile-cell-status-table",
-      "title": "Digital Twin - Last Confirmed Position State",
+      "id": "ce3a3a70-a6a9-4a40-bd72-000000000005",
+      "title": "Last Confirmed Position State",
       "visualType": "table",
-      "query": "CurrentPositionOccupancy | join kind=leftouter (MonitoredPositions | join kind=inner Cells on cellId | join kind=inner Plants on plantId) on $left.subjectId == $right.positionId | project Plant = plantName, Cell = cellName, Position = positionName, SubjectId = subjectId, ObservationType = observationType, Status = iff(isOccupied, 'Occupied', 'Empty'), Confidence = confidence, LastCaptured = capturedAt, Camera = sourceId | order by Cell asc",
-      "size": { "width": 12, "height": 4 },
-      "position": { "row": 2, "col": 0 }
+      "queryRef": { "kind": "query", "queryId": "f36c8264-f362-47e9-9954-000000000005" },
+      "pageId": "50be4fa0-851c-4631-9896-000000000001",
+      "layout": { "x": 0, "y": 3, "width": 12, "height": 6 },
+      "visualOptions": {}
     },
     {
-      "id": "tile-recent-transitions",
-      "title": "Presence Transitions (Last 1 Hour)",
+      "id": "ce3a3a70-a6a9-4a40-bd72-000000000006",
+      "title": "Presence Transitions",
       "visualType": "table",
-      "query": "ConfirmedPresenceEvents | where capturedAt > ago(1h) | summarize arg_max(publishedAt, *) by eventId | order by capturedAt desc | project Timestamp = capturedAt, Subject = subjectId, ObservationType = observationType, Action = iff(isOccupied, 'Present (Occupied)', 'Absent (Empty)'), Confidence = confidence, Model = model",
-      "size": { "width": 8, "height": 4 },
-      "position": { "row": 6, "col": 0 }
+      "queryRef": { "kind": "query", "queryId": "f36c8264-f362-47e9-9954-000000000006" },
+      "pageId": "50be4fa0-851c-4631-9896-000000000001",
+      "layout": { "x": 0, "y": 9, "width": 8, "height": 6 },
+      "visualOptions": {}
     },
     {
-      "id": "tile-ingestion-latency",
+      "id": "ce3a3a70-a6a9-4a40-bd72-000000000007",
       "title": "Edge-to-Cloud Latency (Seconds)",
-      "visualType": "timechart",
-      "query": "ProcessEventsRaw | where ingestion_time() > ago(30m) | extend LatencySec = datetime_diff('second', ingestion_time(), capturedAt) | summarize AvgLatency = avg(LatencySec) by bin(ingestion_time(), 1m)",
-      "size": { "width": 4, "height": 4 },
-      "position": { "row": 6, "col": 8 }
+      "visualType": "line",
+      "queryRef": { "kind": "query", "queryId": "f36c8264-f362-47e9-9954-000000000007" },
+      "pageId": "50be4fa0-851c-4631-9896-000000000001",
+      "layout": { "x": 8, "y": 9, "width": 4, "height": 6 },
+      "visualOptions": { "xColumn": "IngestedAt", "yColumns": ["AvgLatencySeconds"], "xColumnTitle": "Ingestion time (UTC)", "yColumnTitle": "Seconds" }
     }
-  ]
+  ],
+  "baseQueries": [],
+  "parameters": [
+    {
+      "kind": "duration",
+      "id": "50be4fa0-851c-4631-9896-000000000002",
+      "displayName": "Time range",
+      "description": "Capture time for transitions; ingestion time for latency. Summary and position state show the latest confirmed evidence across all time, not camera health.",
+      "beginVariableName": "_startTime",
+      "endVariableName": "_endTime",
+      "defaultValue": { "kind": "dynamic", "count": 1, "unit": "hours" },
+      "showOnPages": { "kind": "all" }
+    }
+  ],
+  "dataSources": [
+    {
+      "kind": "manual-kusto",
+      "name": "Configure Tiger KQL Database",
+      "clusterUri": "https://example.invalid",
+      "database": "REPLACE_WITH_KQL_DATABASE",
+      "id": "50be4fa0-851c-4631-9896-000000000003"
+    }
+  ],
+  "pages": [{ "name": "Position Overview", "id": "50be4fa0-851c-4631-9896-000000000001" }],
+  "queries": [
+    {
+      "id": "f36c8264-f362-47e9-9954-000000000001",
+      "dataSource": { "kind": "inline", "dataSourceId": "50be4fa0-851c-4631-9896-000000000003" },
+      "usedVariables": [],
+      "text": "CurrentPositionOccupancy\n| summarize Positions = count()"
+    },
+    {
+      "id": "f36c8264-f362-47e9-9954-000000000002",
+      "dataSource": { "kind": "inline", "dataSourceId": "50be4fa0-851c-4631-9896-000000000003" },
+      "usedVariables": [],
+      "text": "CurrentPositionOccupancy\n| summarize Occupied = countif(isOccupied == true)"
+    },
+    {
+      "id": "f36c8264-f362-47e9-9954-000000000003",
+      "dataSource": { "kind": "inline", "dataSourceId": "50be4fa0-851c-4631-9896-000000000003" },
+      "usedVariables": [],
+      "text": "CurrentPositionOccupancy\n| summarize Empty = countif(isOccupied == false)"
+    },
+    {
+      "id": "f36c8264-f362-47e9-9954-000000000004",
+      "dataSource": { "kind": "inline", "dataSourceId": "50be4fa0-851c-4631-9896-000000000003" },
+      "usedVariables": [],
+      "text": "CurrentPositionOccupancy\n| summarize TotalPositions = count(), OccupiedCount = countif(isOccupied == true)\n| project Rate = iff(TotalPositions == 0, real(null), round(100.0 * OccupiedCount / TotalPositions, 1))"
+    },
+    {
+      "id": "f36c8264-f362-47e9-9954-000000000005",
+      "dataSource": { "kind": "inline", "dataSourceId": "50be4fa0-851c-4631-9896-000000000003" },
+      "usedVariables": [],
+      "text": "CurrentPositionOccupancy\n| join kind=leftouter (MonitoredPositions | join kind=inner Cells on cellId | join kind=inner Plants on plantId) on $left.subjectId == $right.positionId\n| project Plant = plantName, Cell = cellName, Position = positionName, SubjectId = subjectId, ObservationType = observationType, Status = iff(isOccupied, 'Occupied', 'Empty'), Confidence = confidence, LastCaptured = capturedAt, Camera = sourceId\n| order by Cell asc, Position asc"
+    },
+    {
+      "id": "f36c8264-f362-47e9-9954-000000000006",
+      "dataSource": { "kind": "inline", "dataSourceId": "50be4fa0-851c-4631-9896-000000000003" },
+      "usedVariables": ["_startTime", "_endTime"],
+      "text": "ConfirmedPresenceEvents\n| where capturedAt between (_startTime .. _endTime)\n| summarize arg_max(publishedAt, *) by eventId\n| project Timestamp = capturedAt, Subject = subjectId, ObservationType = observationType, Action = iff(isOccupied, 'Present (Occupied)', 'Absent (Empty)'), Confidence = confidence, Model = model\n| top 500 by Timestamp desc"
+    },
+    {
+      "id": "f36c8264-f362-47e9-9954-000000000007",
+      "dataSource": { "kind": "inline", "dataSourceId": "50be4fa0-851c-4631-9896-000000000003" },
+      "usedVariables": ["_startTime", "_endTime"],
+      "text": "ProcessEventsRaw\n| extend IngestedAt = ingestion_time()\n| where IngestedAt between (_startTime .. _endTime)\n| extend LatencySeconds = datetime_diff('millisecond', IngestedAt, capturedAt) / 1000.0\n| summarize AvgLatencySeconds = avg(LatencySeconds) by bin(IngestedAt, 1m)\n| order by IngestedAt asc"
+    }
+  ],
+  "embeddedApps": []
 }
