@@ -102,6 +102,15 @@ Python package feed, disables automatic interpreter downloads, and uses Python
 from the base image. Building also requires access to Docker Hub, GHCR, and Debian
 package repositories under your organization's policies.
 
+The build copies `uv.lock` and installs with `uv sync --locked`, verifying locked
+versions and hashes. After changing dependencies, regenerate and verify the lock
+against the same approved feed before rebuilding:
+
+```bash
+uv lock --project apps/detect --default-index https://packagefeedproxy.microsoft.io/pypi/simple
+uv lock --project apps/detect --check --default-index https://packagefeedproxy.microsoft.io/pypi/simple
+```
+
 Privately configure `CAMERA_A_RTSP_URL` in `apps/.env`. Use the camera's reachable
 LAN address; `localhost` inside the container refers to the container itself.
 From the repository root, start the local camera and viewer:
@@ -155,6 +164,13 @@ docker compose --env-file apps/.env -f apps/docker-compose.yml --profile fabric 
 
 The publisher reads the mounted secret file, waits for the detector's event file,
 then follows complete new records. Its first run also sends any existing backlog.
+Follow mode retries publication availability failures up to five times, waiting
+1, 2, 4, 8, and 16 seconds. A successful poll resets the retry budget. Invalid
+records, changed inputs, and checkpoint errors stop immediately. Exhausted retries
+also stop the publisher; Compose does not automatically restart it. After fixing
+the cause, run `docker compose --profile fabric up -d publisher` from `apps`
+with the same UID/GID settings. You must also start the publisher explicitly after
+a Docker daemon restart.
 Only the publisher receives this secret. Compose secret files are local files,
 not an encrypted secret store. Never commit them or paste their contents into logs.
 
@@ -173,6 +189,15 @@ Rebuilding does not change existing volume ownership.
 The detector's event, status, and preview files stay in the host `data`
 directory. Keep event files append-only. Do not rotate, truncate, or replace a
 followed file without stopping the publisher and reconciling its delivery state.
+Checkpoint version 2 stores a SHA-256 hash of the entire acknowledged prefix,
+verified in bounded-memory chunks on each poll and resume. Hashing cost grows
+with acknowledged file size, although new records update the hash incrementally
+within each poll. Version 1 tail-only checkpoints are rejected, not automatically
+upgraded. Before upgrading an existing publisher, stop it and preserve both its
+input and checkpoint. Reconcile acknowledged event IDs with the destination
+before establishing a new checkpoint; starting without the old checkpoint replays
+the file from the beginning and can duplicate events. Never edit the checkpoint
+version to bypass this check.
 This version does not automatically compact acknowledged files; monitor disk space.
 Changing the camera manifest also requires matching viewer and publisher input
 paths in Compose. Do not run a host detector against the same outputs concurrently.

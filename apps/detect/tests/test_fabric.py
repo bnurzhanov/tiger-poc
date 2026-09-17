@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
 from tiger_perception import fabric as relay
 from tiger_perception.contracts import ProcessEvent
 from tiger_perception.sinks import (
@@ -469,7 +470,7 @@ def test_given_failed_send_when_following_then_retry_same_event_on_restart(tmp_p
     assert published == events[1:]
 
 
-@pytest.mark.parametrize("change", ["truncate", "replace", "corrupt"])
+@pytest.mark.parametrize("change", ["truncate", "replace", "corrupt", "prefix"])
 def test_given_changed_input_when_following_then_fail_without_skipping(tmp_path: Path, change: str) -> None:
     source = tmp_path / "events.jsonl"
     checkpoint = tmp_path / "delivery.json"
@@ -481,11 +482,42 @@ def test_given_changed_input_when_following_then_fail_without_skipping(tmp_path:
         if change == "replace":
             source.rename(tmp_path / "old.jsonl")
             source.write_text(content)
+        elif change == "prefix":
+            assert len(content) > 256
+            with source.open("r+b") as handle:
+                handle.write(b"x")
         else:
             source.write_text("" if change == "truncate" else "x" * len(content))
         with pytest.raises(SinkError, match="replaced or truncated"):
             follower.poll_once(lambda event: pytest.fail("Unexpected publication"))
         assert checkpoint.read_bytes() == original
+
+
+def test_given_rewritten_prefix_when_resuming_then_reject_unchanged_tail(tmp_path: Path) -> None:
+    source, checkpoint = tmp_path / "events.jsonl", tmp_path / "state.json"
+    source.write_text(json.dumps(relay.generate_scenario_events()[0]) + "\n")
+    with relay.JsonlFollower([source], checkpoint, dry_run=False) as follower:
+        follower.poll_once(lambda event: True)
+    original = checkpoint.read_bytes()
+
+    with source.open("r+b") as handle:
+        handle.write(b"x")
+
+    with (relay.JsonlFollower([source], checkpoint, dry_run=False) as follower,
+          pytest.raises(SinkError, match="replaced or truncated")):
+        follower.poll_once(lambda event: pytest.fail("Unexpected publication"))
+    assert checkpoint.read_bytes() == original
+
+
+def test_given_legacy_checkpoint_when_resuming_then_require_reconciliation(tmp_path: Path) -> None:
+    source, checkpoint = tmp_path / "events.jsonl", tmp_path / "state.json"
+    original = json.dumps({"version": 1, "inputs": [str(source)], "mode": "live", "positions": {}})
+    checkpoint.write_text(original)
+
+    with pytest.raises(SinkError, match="checkpoint"), relay.JsonlFollower([source], checkpoint, dry_run=False):
+        pytest.fail("Legacy checkpoint was accepted")
+
+    assert checkpoint.read_text() == original
 
 
 def test_given_checkpoint_owner_when_second_follower_starts_then_refuse(tmp_path: Path) -> None:
@@ -549,6 +581,45 @@ def test_given_follow_cli_when_new_events_arrive_then_publish_until_interrupted(
     assert result == 130
     assert json.loads(audit.read_text()) == event
     assert json.loads(checkpoint.read_text())["positions"][str(source)]["offset"] == source.stat().st_size
+
+
+@pytest.mark.parametrize("failure", ["transient", "permanent", "exhausted"])
+def test_given_follow_failure_when_publishing_then_retry_only_unavailability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    source, checkpoint = tmp_path / "events.jsonl", tmp_path / "state.json"
+    event = relay.generate_scenario_events()[0]
+    source.write_text(json.dumps(event) + "\n")
+    attempts, delays = [], []
+
+    def publish(_self, record):
+        attempts.append(record)
+        if failure == "permanent":
+            raise SinkError("invalid input")
+        if failure == "exhausted" or len(attempts) <= 2:
+            raise SinkUnavailableError("offline")
+        return True
+
+    def pause(seconds):
+        delays.append(seconds)
+        if seconds == 0.25:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(relay.FabricEventstreamSink, "publish", publish)
+    monkeypatch.setattr(relay.time, "sleep", pause)
+
+    result = relay.main(["--input", str(source), "--follow", "--checkpoint", str(checkpoint)])
+
+    if failure == "transient":
+        assert result == 130
+        assert attempts == [event] * 3
+        assert delays == [1, 2, 0.25]
+        assert json.loads(checkpoint.read_text())["positions"][str(source)]["offset"] == source.stat().st_size
+    else:
+        assert result == 1
+        assert attempts == [event] * (1 if failure == "permanent" else 6)
+        assert delays == ([] if failure == "permanent" else [1, 2, 4, 8, 16])
+        assert not checkpoint.exists()
 
 
 @pytest.mark.parametrize("arguments", [

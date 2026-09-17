@@ -53,6 +53,7 @@ services:
 
   publisher:
     <<: *runtime
+    restart: "no"
     profiles: [fabric]
     command:
       - uv

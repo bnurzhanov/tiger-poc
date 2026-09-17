@@ -185,7 +185,7 @@ class JsonlFollower:
         self.paths = [path.resolve() for path in paths]
         self.checkpoint = checkpoint.resolve()
         self.expected = {
-            "version": 1, "inputs": [str(path) for path in self.paths],
+            "version": 2, "inputs": [str(path) for path in self.paths],
             "mode": "dry-run" if dry_run else "live",
         }
         self.state: dict[str, Any] = {**self.expected, "positions": {}}
@@ -208,7 +208,7 @@ class JsonlFollower:
                     if (not isinstance(position, dict)
                             or type(position.get("offset")) is not int or position["offset"] < 0
                             or type(position.get("inode")) is not int
-                            or not isinstance(position.get("anchor"), str)):
+                            or not isinstance(position.get("prefixHash"), str)):
                         raise SinkError("Invalid delivery checkpoint position.")
         except (OSError, ValueError, TypeError):
             self._lock.close()
@@ -223,9 +223,17 @@ class JsonlFollower:
             self._lock = None
 
     @staticmethod
-    def _anchor(handle: Any, offset: int) -> str:
-        handle.seek(max(0, offset - 256))
-        return hashlib.sha256(handle.read(min(offset, 256))).hexdigest()
+    def _prefix_hash(handle: Any, offset: int) -> Any:
+        handle.seek(0)
+        digest = hashlib.sha256()
+        remaining = offset
+        while remaining:
+            chunk = handle.read(min(remaining, 1024 * 1024))
+            if not chunk:
+                raise SinkError("A followed input was replaced or truncated; reconcile its checkpoint before retrying.")
+            digest.update(chunk)
+            remaining -= len(chunk)
+        return digest
 
     def _save(self) -> None:
         temporary = self.checkpoint.with_suffix(self.checkpoint.suffix + ".tmp")
@@ -259,8 +267,10 @@ class JsonlFollower:
                 offset = position["offset"] if position else 0
                 if position and (
                     info.st_ino != position["inode"] or info.st_size < offset
-                    or self._anchor(handle, offset) != position["anchor"]
                 ):
+                    raise SinkError("A followed input was replaced or truncated; reconcile its checkpoint before retrying.")
+                digest = self._prefix_hash(handle, offset)
+                if position and digest.hexdigest() != position["prefixHash"]:
                     raise SinkError("A followed input was replaced or truncated; reconcile its checkpoint before retrying.")
                 handle.seek(offset)
                 for _record in range(100):
@@ -278,9 +288,10 @@ class JsonlFollower:
                             raise SinkUnavailableError("Publication was not acknowledged; checkpoint retained.")
                         published += 1
                     offset = handle.tell()
+                    digest.update(line)
                     self.state["positions"][str(path)] = {
                         "offset": offset, "inode": info.st_ino,
-                        "anchor": self._anchor(handle, offset),
+                        "prefixHash": digest.hexdigest(),
                     }
                     self._save()
         return published
@@ -346,8 +357,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.follow:
             with JsonlFollower(args.input, args.checkpoint, dry_run=sink.dry_run) as follower:
                 logger.info("Following %d append-only event file(s)", len(args.input))
+                retries = 0
                 while True:
-                    count = follower.poll_once(sink.publish)
+                    try:
+                        count = follower.poll_once(sink.publish)
+                    except SinkUnavailableError:
+                        if retries >= 5:
+                            raise
+                        delay = 2 ** retries
+                        retries += 1
+                        logger.warning("Publication unavailable; retry %d/5 in %d seconds", retries, delay)
+                        time.sleep(delay)
+                        continue
+                    retries = 0
                     if count:
                         logger.info("%s %d events", "Validated" if sink.dry_run else "Published", count)
                     time.sleep(args.poll_interval)
