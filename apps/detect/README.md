@@ -402,7 +402,7 @@ for live delivery. Do not change a destination while reusing its delivery state.
 
 Invalid records, replaced/truncated inputs, and publication failures stop the
 relay without skipping the failed event. SDK retries remain enabled; Compose
-restarts the publisher after failure and resumes its acknowledged offsets. A crash
+does not automatically restart the publisher; a manual restart resumes its acknowledged offsets.
 between remote acceptance and saving the checkpoint can resend an event: delivery
 is at-least-once, not exactly-once. Deduplicate by `eventId` downstream. Checkpoint
 locking only prevents duplicate publishers using that same checkpoint; do not run
