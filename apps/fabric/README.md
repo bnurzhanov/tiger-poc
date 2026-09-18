@@ -19,10 +19,10 @@ boolean value and `unit == "boolean"` can update occupancy.
 
 Plant metadata is optional on the wire. Occupancy queries join stable subject IDs
 to reference tables instead of depending on payload plant fields. Seeded IDs match
-the current detect manifests: cell A object, cell A pallet (root `manifest.yaml`
-subject), cell B object, and cell B pallet. The two cell B manifests are
-alternatives, not simultaneous owners of one output. Update the reference rows
-when configuring other sources or subjects.
+the current detect manifests: cell A object, cell B object, and cell B pallet.
+The two cell B manifests are alternatives, not simultaneous owners of one output.
+The cell A pallet reference row is retained for a future pallet configuration.
+Update the reference rows when configuring other sources or subjects.
 
 ## Data Flow
 

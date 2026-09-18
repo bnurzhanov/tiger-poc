@@ -51,6 +51,44 @@ strings into the config, manifests, source control, or chat. Application-only
 Azure CLI sessions are rejected. Credentials are requested separately for Fabric,
 OneLake, and the workspace's KQL endpoint.
 
+### Check And Resume Capacity
+
+Before running `apply`, check that the assigned Fabric capacity is active. Replace
+the resource group and capacity name with your environment:
+
+```bash
+export RESOURCE_GROUP="rg-fabric-cus"
+export CAPACITY_NAME="cusf4"
+
+CAPACITY_ID=$(az fabric capacity show \
+   --resource-group "$RESOURCE_GROUP" \
+   --capacity-name "$CAPACITY_NAME" \
+   --query id \
+   -o tsv)
+CAPACITY_STATE=$(az fabric capacity show \
+   --ids "$CAPACITY_ID" \
+   --query properties.state \
+   -o tsv)
+
+printf 'Fabric capacity state: %s\n' "$CAPACITY_STATE"
+```
+
+`Active` means the capacity is running. If the reported state is not `Active`,
+resume it and verify the resulting state:
+
+```bash
+if [[ "$CAPACITY_STATE" != "Active" ]]; then
+   az fabric capacity resume --ids "$CAPACITY_ID"
+   az fabric capacity show \
+      --ids "$CAPACITY_ID" \
+      --query "{name:name, state:properties.state}" \
+      -o table
+fi
+```
+
+The resume operation can take time to complete. Rerun the state check and wait
+for `Active` before starting the bootstrap.
+
 ## Plan And Apply
 
 Run from the repository root:
