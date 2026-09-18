@@ -13,11 +13,10 @@ processes' status files and annotated previews without accessing camera credenti
 The bundled `yolo26n.pt` supports **chair**, not pallet. The prepared
 [Cell A](manifests/cell-a.yaml) and [Cell B](manifests/cell-b.yaml) configurations
 are household-object trials emitting `ObjectPresent`. They do not satisfy the
-physical pallet-model or recording criteria. The [root manifest](../../manifest.yaml)
-and [Cell B pallet manifest](manifests/cell-b-pallet.yaml) are the paired pallet
-templates and require trusted local pallet weights at `models/pallet.pt`; no such
-model is bundled. Use these instead of the household manifests after supplying and
-validating the weights. See the
+physical pallet-model or recording criteria. The [Cell B pallet manifest](manifests/cell-b-pallet.yaml)
+is the pallet template and requires trusted local pallet weights at
+`models/pallet.pt`; no such model is bundled. Use it instead of the household
+manifests after supplying and validating the weights. See the
 [validation record](../../docs/milestone-1-validation.md) for remaining gates.
 
 ## Prepare
